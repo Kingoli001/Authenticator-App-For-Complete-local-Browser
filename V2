@@ -1,0 +1,4440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Code Instrument — TOTP / HOTP Authenticator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
+<style>
+  :root{
+    --bg:#10141b;
+    --panel:#1b212b;
+    --panel-2:#212938;
+    --border:#2c3444;
+    --text:#edeae4;
+    --text-dim:#8991a3;
+    --amber:#f2a93b;
+    --amber-dim:rgba(242,169,59,0.16);
+    --teal:#4fb6a6;
+    --teal-dim:rgba(79,182,166,0.16);
+    --danger:#e2574c;
+    --danger-dim:rgba(226,87,76,0.16);
+    --ring-circumference: 565.48;
+  }
+
+  *{box-sizing:border-box;}
+  [hidden]{ display:none !important; }
+
+  html,body{
+    margin:0;
+    min-height:100%;
+    background:
+      radial-gradient(circle at 50% -10%, rgba(242,169,59,0.06), transparent 55%),
+      var(--bg);
+    background-image:
+      radial-gradient(circle at 50% -10%, rgba(242,169,59,0.06), transparent 55%),
+      linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px),
+      var(--bg);
+    background-size: auto, 28px 28px, 28px 28px, auto;
+    color:var(--text);
+    font-family:'IBM Plex Sans', sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .stage{
+    min-height:100vh;
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    padding:2.25rem 1rem 3rem;
+  }
+
+  .card{
+    width:min(94vw, 440px);
+    background:linear-gradient(180deg, var(--panel-2), var(--panel));
+    border:1px solid var(--border);
+    border-radius:20px;
+    padding:1.5rem 1.5rem 1.25rem;
+    box-shadow: 0 30px 60px -25px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    position:relative;
+    overflow:hidden;
+  }
+  .card::before{
+    content:"";
+    position:absolute;
+    top:-40%; left:-20%;
+    width:70%; height:70%;
+    background:radial-gradient(circle, rgba(242,169,59,0.08), transparent 70%);
+    pointer-events:none;
+  }
+
+  .card-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:0.75rem;
+    position:relative;
+  }
+
+  .eyebrow{
+    font-size:0.66rem;
+    letter-spacing:0.14em;
+    color:var(--text-dim);
+    font-weight:600;
+    text-transform:uppercase;
+  }
+
+  .mode-pill{
+    display:flex;
+    align-items:center;
+    gap:0.4rem;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.68rem;
+    letter-spacing:0.08em;
+    font-weight:600;
+    padding:0.28rem 0.6rem;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:rgba(255,255,255,0.02);
+    color:var(--danger);
+    transition:color .25s ease, border-color .25s ease;
+  }
+  .mode-pill .dot{
+    width:6px;height:6px;border-radius:50%;
+    background:var(--danger);
+    box-shadow:0 0 8px 1px var(--danger);
+    animation:pulse 1.6s ease-in-out infinite;
+  }
+  .mode-pill.custom{ color:var(--teal); border-color:rgba(79,182,166,0.35); }
+  .mode-pill.custom .dot{ background:var(--teal); box-shadow:0 0 8px 1px var(--teal); animation:none; }
+  .mode-pill.idle{ color:var(--text-dim); border-color:var(--border); }
+  .mode-pill.idle .dot{ background:var(--text-dim); box-shadow:none; animation:none; }
+
+  @keyframes pulse{
+    0%,100%{ opacity:1; }
+    50%{ opacity:0.35; }
+  }
+
+  .title{
+    margin:0.6rem 0 1.3rem;
+    font-size:1.5rem;
+    font-weight:700;
+    letter-spacing:-0.01em;
+  }
+
+  .field{ display:flex; flex-direction:column; gap:0.4rem; margin-bottom:0.9rem; }
+  .field-label{ font-size:0.72rem; color:var(--text-dim); font-weight:600; letter-spacing:0.03em; }
+  .field-hint{ font-size:0.7rem; color:var(--text-dim); line-height:1.4; }
+
+  .scan-result{
+    margin:0.45rem 0 0;
+    font-size:0.74rem;
+    color:var(--teal);
+    background:var(--teal-dim);
+    border:1px solid rgba(79,182,166,0.35);
+    border-radius:8px;
+    padding:0.4rem 0.6rem;
+    display:flex;
+    align-items:center;
+    gap:0.4rem;
+  }
+
+  .secret-row{ display:flex; gap:0.5rem; }
+  .secret-row input{ flex:1; }
+  .play-btn{
+    flex-shrink:0;
+    width:44px;
+    background:var(--amber);
+    color:#1a1305;
+    border:none;
+    border-radius:10px;
+    font-size:0.95rem;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    transition:filter .15s ease, transform .1s ease, background .2s ease, color .2s ease;
+  }
+  .play-btn:hover:not(:disabled){ filter:brightness(1.08); }
+  .play-btn:active:not(:disabled){ transform:translateY(1px); }
+  .play-btn:disabled{ background:var(--border); color:var(--text-dim); cursor:not-allowed; }
+
+  input[type="text"], input[type="number"], input[type="datetime-local"], select{
+    font-family:'IBM Plex Mono', monospace;
+    background:rgba(0,0,0,0.22);
+    border:1px solid var(--border);
+    border-radius:10px;
+    color:var(--text);
+    padding:0.65rem 0.75rem;
+    font-size:0.92rem;
+    outline:none;
+    width:100%;
+    transition:border-color .2s ease, box-shadow .2s ease;
+  }
+  input::placeholder{ color:#565f70; }
+  input:focus, select:focus{
+    border-color:var(--amber);
+    box-shadow:0 0 0 3px var(--amber-dim);
+  }
+  input[type="text"].invalid{
+    border-color:var(--danger);
+    box-shadow:0 0 0 3px var(--danger-dim);
+  }
+
+  details.advanced{
+    margin-bottom:0.9rem;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:rgba(0,0,0,0.12);
+    padding:0.15rem 0.75rem;
+  }
+  details.advanced summary{
+    cursor:pointer;
+    font-size:0.75rem;
+    color:var(--text-dim);
+    font-weight:600;
+    letter-spacing:0.03em;
+    padding:0.55rem 0;
+    list-style:none;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  details.advanced summary::-webkit-details-marker{ display:none; }
+  details.advanced summary::after{
+    content:"+";
+    font-size:1rem;
+    color:var(--text-dim);
+  }
+  details.advanced[open] summary::after{ content:"−"; }
+  .advanced-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:0.75rem;
+    padding-bottom:0.85rem;
+  }
+  .field-sm{ display:flex; flex-direction:column; gap:0.35rem; }
+  .field-sm .field-label{ font-size:0.68rem; }
+
+  .datetime-row{ display:flex; gap:0.6rem; align-items:flex-end; margin-bottom:1.1rem; }
+  .datetime-row .field{ flex:1; margin-bottom:0; }
+  .now-btn{
+    font-family:'IBM Plex Mono', monospace;
+    font-weight:600;
+    font-size:0.82rem;
+    letter-spacing:0.03em;
+    background:var(--amber);
+    color:#1a1305;
+    border:none;
+    border-radius:10px;
+    padding:0.65rem 0.9rem;
+    cursor:pointer;
+    transition:background .2s ease, filter .15s ease, transform .1s ease;
+    white-space:nowrap;
+  }
+  .now-btn:hover{ filter:brightness(1.08); }
+  .now-btn:active{ transform:translateY(1px); }
+
+  .dial-wrap{
+    position:relative;
+    width:min(72vw, 250px);
+    aspect-ratio:1/1;
+    margin:0.4rem auto 1.1rem;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .dial-ring{ width:100%; height:100%; transform:rotate(-90deg); }
+  .ring-track{
+    fill:none;
+    stroke:rgba(255,255,255,0.06);
+    stroke-width:5;
+  }
+  .ring-progress{
+    fill:none;
+    stroke:var(--amber);
+    stroke-width:5;
+    stroke-linecap:round;
+    stroke-dasharray: var(--ring-circumference);
+    stroke-dashoffset:0;
+    transition:stroke-dashoffset 1s linear, stroke .3s ease;
+    filter:drop-shadow(0 0 5px rgba(242,169,59,0.55));
+  }
+  .ring-progress.pulse{ animation:ringPulse 1s ease-in-out infinite; }
+  .ring-progress.custom{ transition:none; }
+  @keyframes ringPulse{
+    0%,100%{ opacity:1; }
+    50%{ opacity:0.55; }
+  }
+  .tick{ stroke:rgba(255,255,255,0.14); stroke-width:1.5; }
+
+  .dial-center{
+    position:absolute;
+    inset:0;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    padding:0 1rem;
+  }
+  .code-display{
+    font-family:'IBM Plex Mono', monospace;
+    font-weight:600;
+    font-size:clamp(1.55rem, 6.5vw, 2rem);
+    letter-spacing:0.04em;
+    font-variant-numeric:tabular-nums;
+    color:var(--text);
+    display:inline-flex;
+    align-items:flex-start;
+  }
+  .code-display.placeholder{
+    display:block;
+    font-family:'IBM Plex Sans', sans-serif;
+    font-weight:600;
+    font-size:clamp(0.82rem, 4vw, 0.98rem);
+    letter-spacing:0.01em;
+    color:var(--text-dim);
+    white-space:normal;
+    line-height:1.35;
+  }
+  .digit-cell{
+    position:relative;
+    display:inline-block;
+    overflow:hidden;
+    height:1.15em;
+    line-height:1.15em;
+    min-width:0.6em;
+    text-align:center;
+  }
+  .digit-space{
+    display:inline-block;
+    width:0.5em;
+  }
+  .digit-old, .digit-new-anim{
+    position:absolute;
+    left:0; right:0; top:0;
+    line-height:1.15em;
+  }
+  .digit-old{ animation: rollOut .34s cubic-bezier(.4,0,.2,1) forwards; }
+  .digit-new-anim{ animation: rollIn .34s cubic-bezier(.4,0,.2,1) forwards; }
+  @keyframes rollOut{
+    0%{ transform:translateY(0); opacity:1; filter:blur(0); }
+    55%{ filter:blur(1.5px); }
+    100%{ transform:translateY(-100%); opacity:0; filter:blur(0); }
+  }
+  @keyframes rollIn{
+    0%{ transform:translateY(100%); opacity:0; filter:blur(1.5px); }
+    55%{ filter:blur(1.5px); }
+    100%{ transform:translateY(0); opacity:1; filter:blur(0); }
+  }
+  .code-sub{
+    margin-top:0.4rem;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.68rem;
+    color:var(--text-dim);
+    letter-spacing:0.02em;
+    line-height:1.35;
+  }
+
+  .next-row{
+    display:flex;
+    align-items:center;
+    gap:0.55rem;
+    background:rgba(0,0,0,0.18);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:0.55rem 0.7rem;
+  }
+  .next-label{
+    font-size:0.64rem;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    font-weight:600;
+  }
+  .next-code{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.9rem;
+    color:#c9cedb;
+    letter-spacing:0.03em;
+    font-variant-numeric:tabular-nums;
+    flex:1;
+    cursor:pointer;
+    user-select:none;
+    -webkit-user-select:none;
+    transition:color .15s ease;
+  }
+  .next-code:hover{ color:var(--amber); }
+  .next-code:active{ opacity:0.7; }
+  .code-display{ cursor:pointer; user-select:none; -webkit-user-select:none; touch-action:manipulation; transition:transform .1s ease, opacity .1s ease; }
+  .code-display.pressing{ transform:scale(0.96); opacity:0.75; }
+
+  .copy-toast{
+    margin:0.55rem 0 0;
+    text-align:center;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.74rem;
+    font-weight:600;
+    letter-spacing:0.04em;
+    color:var(--teal);
+    background:var(--teal-dim);
+    border:1px solid rgba(79,182,166,0.35);
+    border-radius:8px;
+    padding:0.35rem 0.6rem;
+    animation:toastPop .18s ease;
+  }
+  @keyframes toastPop{
+    0%{ opacity:0; transform:translateY(-4px); }
+    100%{ opacity:1; transform:translateY(0); }
+  }
+
+  .footnote{
+    margin:1rem 0 0;
+    font-size:0.66rem;
+    color:#5b6272;
+    text-align:center;
+    line-height:1.5;
+  }
+
+  .gen-link{
+    background:none; border:none; padding:0;
+    color:var(--text-dim);
+    text-decoration:underline;
+    text-decoration-color:var(--border);
+    font-size:0.7rem;
+    cursor:pointer;
+    font-family:'IBM Plex Sans', sans-serif;
+  }
+  .gen-link:hover{ color:var(--amber); text-decoration-color:var(--amber); }
+
+  .scan-btn{
+    flex-shrink:0;
+    width:44px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(255,255,255,0.03);
+    border:1px solid var(--border);
+    color:var(--text);
+    border-radius:10px;
+    cursor:pointer;
+    transition:border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .scan-btn:hover{ border-color:var(--amber); color:var(--amber); background:var(--amber-dim); }
+  .scan-btn.active{ border-color:var(--amber); color:var(--amber); background:var(--amber-dim); }
+
+  .scan-inline{
+    margin-top:0.7rem;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+  .scan-viewport{
+    position:relative;
+    width:100%;
+    max-width:230px;
+    aspect-ratio:1/1;
+    border-radius:14px;
+    overflow:hidden;
+    background:#000;
+  }
+  .scan-viewport video{
+    width:100%; height:100%;
+    object-fit:cover;
+    display:block;
+  }
+  .scan-frame{
+    position:absolute;
+    inset:12%;
+    border:2px solid rgba(242,169,59,0.85);
+    border-radius:12px;
+    box-shadow:0 0 0 999px rgba(0,0,0,0.35);
+    overflow:hidden;
+  }
+  .scan-line{
+    position:absolute;
+    left:0; right:0; top:0;
+    height:2px;
+    background:linear-gradient(90deg, transparent, var(--amber), transparent);
+    box-shadow:0 0 8px 1px var(--amber);
+    animation:scanSweep 2.2s ease-in-out infinite;
+  }
+  @keyframes scanSweep{
+    0%{ top:2%; }
+    50%{ top:96%; }
+    100%{ top:2%; }
+  }
+  .flip-btn{
+    position:absolute;
+    top:8px; right:8px;
+    width:34px; height:34px;
+    border-radius:50%;
+    background:rgba(0,0,0,0.55);
+    border:1px solid rgba(255,255,255,0.3);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    transition:border-color .15s ease, transform .15s ease;
+  }
+  .flip-btn:hover{ border-color:var(--amber); }
+  .flip-btn:active{ transform:scale(0.92); }
+  .flip-btn svg{ width:17px; height:17px; }
+
+  .scan-status{
+    margin:0.5rem 0 0;
+    font-size:0.74rem;
+    color:var(--text-dim);
+    text-align:left;
+    line-height:1.4;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .ring-progress{ transition:none; }
+    .digit-old, .digit-new-anim{ animation:none; }
+    .mode-pill .dot{ animation:none; }
+    .scan-line{ animation:none; top:50%; }
+  }
+
+  /* ---------- List screen ---------- */
+  /* ---------- Hamburger navigation drawer ---------- */
+  .menu-btn{
+    width:38px;height:38px;border-radius:10px;border:1px solid var(--border);
+    background:rgba(255,255,255,0.02);color:var(--text);display:flex;
+    align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;
+    transition:border-color .2s ease,background .2s ease,color .2s ease;
+  }
+  .menu-btn:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+  .menu-btn svg{width:19px;height:19px}
+  .drawer-overlay{
+    position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:90;
+    opacity:0;visibility:hidden;transition:opacity .22s ease,visibility .22s ease;
+    backdrop-filter:blur(2px);
+  }
+  .drawer-overlay.open{opacity:1;visibility:visible}
+  .nav-drawer{
+    position:fixed;left:0;top:0;bottom:0;width:min(310px,86vw);z-index:100;
+    background:var(--panel);border-right:1px solid var(--border);
+    box-shadow:18px 0 45px rgba(0,0,0,.35);transform:translateX(-102%);
+    transition:transform .26s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column;
+    padding:1rem .85rem;
+  }
+  .nav-drawer.open{transform:translateX(0)}
+  .drawer-head{display:flex;align-items:center;justify-content:space-between;padding:.25rem .25rem 1rem;border-bottom:1px solid var(--border)}
+  .drawer-brand{display:flex;align-items:center;gap:.65rem}
+  .drawer-logo{width:36px;height:36px;border-radius:10px;background:var(--amber);color:#1a1305;display:flex;align-items:center;justify-content:center;font-weight:800}
+  .drawer-brand strong{font-size:.9rem;letter-spacing:.02em}.drawer-brand span{display:block;color:var(--text-dim);font-size:.66rem;margin-top:.12rem}
+  .drawer-close{width:34px;height:34px;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--text);font-size:1.25rem;cursor:pointer}
+  .drawer-close:hover{border-color:var(--amber);color:var(--amber)}
+  .drawer-section{padding:.95rem .25rem 0}.drawer-label{font-size:.62rem;text-transform:uppercase;letter-spacing:.12em;color:var(--text-dim);font-weight:700;margin:0 .65rem .45rem}
+  .drawer-item{width:100%;display:flex;align-items:center;gap:.75rem;border:1px solid transparent;background:transparent;color:var(--text);padding:.72rem .65rem;border-radius:10px;font:600 .82rem 'IBM Plex Sans',sans-serif;text-align:left;cursor:pointer;transition:.16s ease}
+  .drawer-item:hover,.drawer-item.active{background:var(--amber-dim);border-color:rgba(242,169,59,.22);color:var(--amber)}
+  .drawer-item svg{width:18px;height:18px;flex-shrink:0}.drawer-footer{margin-top:auto;border-top:1px solid var(--border);padding:.8rem .65rem;color:var(--text-dim);font-size:.64rem;line-height:1.5}
+  .drawer-footer b{color:var(--text)}
+  .settings-panel{position:fixed;inset:0;z-index:110;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.58);opacity:0;visibility:hidden;transition:.2s ease}
+  .settings-panel.open{opacity:1;visibility:visible}.settings-card{width:min(520px,100%);max-height:90dvh;overflow-y:auto;overscroll-behavior:contain;background:var(--panel);border:1px solid var(--border);border-bottom:none;border-radius:18px 18px 0 0;padding:1rem 1rem 1.25rem;transform:translateY(20px);transition:.22s ease;box-sizing:border-box}.settings-card::-webkit-scrollbar{width:5px}.settings-card::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:10px}
+  .settings-panel.open .settings-card{transform:translateY(0)}.settings-head{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;margin:0 0 .8rem;padding:.05rem 0 .8rem;background:var(--panel);border-bottom:1px solid var(--border)}.settings-head h2{font-size:1rem}.settings-row{display:flex;align-items:center;justify-content:space-between;padding:.85rem 0;border-bottom:1px solid var(--border);font-size:.82rem}.settings-row small{display:block;color:var(--text-dim);margin-top:.2rem;font-size:.67rem}
+  .theme-toggle{width:42px;height:24px;border-radius:99px;border:1px solid var(--border);background:rgba(255,255,255,.06);position:relative;cursor:pointer}.theme-toggle:after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:var(--text-dim);left:2px;top:2px;transition:.2s}.theme-toggle.on{background:var(--amber-dim);border-color:rgba(242,169,59,.4)}.theme-toggle.on:after{left:20px;background:var(--amber)}
+  .about-panel{position:fixed;inset:0;z-index:110;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(0,0,0,.58);opacity:0;visibility:hidden;transition:.2s ease}.about-panel.open{opacity:1;visibility:visible}.about-card{width:min(390px,100%);background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:1.25rem;text-align:center}.about-card .drawer-logo{margin:0 auto .7rem}.about-card h2{font-size:1rem;margin-bottom:.3rem}.about-card p{color:var(--text-dim);font-size:.72rem;line-height:1.55}
+  .about-close-btn{width:100%;height:44px;margin-top:1.1rem;border:0;border-radius:10px;background:var(--amber);color:#1a1305;font:700 .8rem 'IBM Plex Sans',sans-serif;cursor:pointer}
+  .about-close-btn:hover{filter:brightness(1.06)}
+  .about-meta{margin-top:.9rem;padding-top:.9rem;border-top:1px solid var(--border)}
+  .about-meta p{margin:.22rem 0;font-size:.68rem}
+  .about-meta p b{color:var(--text)}
+  .about-copyright{margin-top:.5rem !important;color:var(--text-dim);opacity:.8}
+
+  /* ---------- Backup / restore (Phase 3) ---------- */
+  .backup-panel{position:fixed;inset:0;z-index:115;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.58);opacity:0;visibility:hidden;transition:.2s ease}
+  .backup-panel.open{opacity:1;visibility:visible}
+  .backup-card{width:min(520px,100%);background:var(--panel);border:1px solid var(--border);border-bottom:none;border-radius:18px 18px 0 0;padding:1rem 1rem 1.25rem;transform:translateY(20px);transition:.22s ease;box-shadow:0 -18px 50px rgba(0,0,0,.3)}
+  .backup-panel.open .backup-card{transform:translateY(0)}
+  .backup-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}.backup-head h2{font-size:1rem}
+  .backup-note{color:var(--text-dim);font-size:.7rem;line-height:1.5;margin-bottom:.8rem}
+  .backup-warning{padding:.65rem .7rem;border:1px solid rgba(242,169,59,.25);background:var(--amber-dim);border-radius:10px;color:var(--text);font-size:.68rem;line-height:1.45;margin-bottom:.8rem}
+  .recovery-code-display{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:1.05rem;
+    font-weight:700;
+    letter-spacing:0.06em;
+    color:var(--amber);
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:.85rem .6rem;
+    margin:.9rem 0;
+    word-break:break-all;
+    user-select:all;
+  }
+  .recovery-confirm-row{
+    display:flex;
+    align-items:flex-start;
+    gap:.5rem;
+    text-align:left;
+    font-size:.72rem;
+    color:var(--text-dim);
+    margin-bottom:.6rem;
+    cursor:pointer;
+  }
+  .recovery-confirm-row input{ margin-top:.15rem; flex-shrink:0; }
+  .backup-actions{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}.backup-action{height:42px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.025);color:var(--text);font:600 .75rem 'IBM Plex Sans',sans-serif;cursor:pointer}.backup-action:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+  .backup-action.primary{background:var(--amber);border-color:var(--amber);color:#1a1305}.backup-action.primary:hover{filter:brightness(1.06)}
+  .backup-status{min-height:1.1rem;margin-top:.65rem;color:var(--text-dim);font-size:.66rem}
+  .pin-modal{position:fixed;inset:0;z-index:260;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(0,0,0,.72);opacity:0;visibility:hidden;pointer-events:none;transition:.18s ease}
+  .pin-modal.open{opacity:1;visibility:visible;pointer-events:auto}
+  .backup-password-card{width:min(390px,100%)}
+  .backup-password-input{margin-bottom:.55rem;letter-spacing:.06em;text-align:left;padding:0 .9rem;font-size:.82rem}
+  .backup-password-input::placeholder{letter-spacing:0;color:var(--text-dim)}
+  .list-wrap{ width:min(94vw, 480px); margin:0 auto; }
+
+  /* ---------- Accounts toolbar ---------- */
+  .list-topbar{ margin-bottom:1rem; }
+  .account-tools{
+    display:flex;
+    align-items:center;
+    gap:.55rem;
+    margin-bottom:1rem;
+  }
+  .account-search{
+    position:relative;
+    flex:1;
+    min-width:0;
+  }
+  .account-search svg{
+    position:absolute;
+    left:.78rem;
+    top:50%;
+    width:18px;
+    height:18px;
+    transform:translateY(-50%);
+    color:var(--text-dim);
+    pointer-events:none;
+  }
+  .account-search input{
+    width:100%;
+    height:42px;
+    padding:.62rem .75rem .62rem 2.35rem;
+    border:1px solid var(--border);
+    border-radius:11px;
+    background:rgba(0,0,0,.22);
+    color:var(--text);
+    font-family:'IBM Plex Sans',sans-serif;
+    font-size:.82rem;
+    outline:none;
+  }
+  .account-search input:focus{
+    border-color:var(--amber);
+    box-shadow:0 0 0 3px var(--amber-dim);
+  }
+  .account-search input::-webkit-search-cancel-button{ filter:grayscale(1); }
+  .sort-btn{
+    flex:0 0 auto;
+    height:42px;
+    padding:0 .78rem;
+    border:1px solid var(--border);
+    border-radius:11px;
+    background:rgba(255,255,255,.02);
+    color:var(--text);
+    font:600 .72rem 'IBM Plex Mono',monospace;
+    cursor:pointer;
+  }
+  .sort-btn:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+
+  .card-actions{display:flex;gap:.35rem;align-items:center;flex-shrink:0}
+  .card-action{
+    width:32px;height:32px;border-radius:9px;border:1px solid var(--border);
+    background:rgba(255,255,255,.025);color:var(--text-dim);
+    display:flex;align-items:center;justify-content:center;
+    font:700 .9rem 'IBM Plex Sans',sans-serif;cursor:pointer;
+  }
+  .card-action:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+  .card-action.danger:hover{border-color:rgba(226,87,76,.5);color:var(--danger);background:var(--danger-dim)}
+  .account-card.dragging{opacity:.45;transform:scale(.99)}
+  .account-card.drop-target{border-color:var(--amber);box-shadow:0 0 0 2px var(--amber-dim)}
+
+  /* ---------- Delete confirmation ---------- */
+  .confirm-panel{
+    position:fixed;inset:0;z-index:120;
+    display:flex;align-items:center;justify-content:center;
+    padding:1rem;background:rgba(0,0,0,.62);
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .2s ease,visibility .2s ease;
+  }
+  .confirm-panel.open{opacity:1;visibility:visible;pointer-events:auto}
+  .confirm-card{
+    width:min(390px,100%);background:var(--panel);
+    border:1px solid var(--border);border-radius:16px;padding:1.25rem;
+    box-shadow:0 25px 60px rgba(0,0,0,.45);
+  }
+  .confirm-card h3{margin:0 0 .45rem;font-size:1rem}
+  .confirm-card p{margin:0;color:var(--text-dim);font-size:.78rem;line-height:1.5}
+  .confirm-actions{display:flex;justify-content:flex-end;gap:.55rem;margin-top:1rem}
+  .confirm-actions button{
+    min-width:84px;height:38px;padding:0 .8rem;border-radius:9px;
+    border:1px solid var(--border);background:transparent;color:var(--text);
+    font-weight:700;cursor:pointer;
+  }
+  .confirm-actions button:hover{border-color:var(--amber);color:var(--amber)}
+  .confirm-actions .danger-confirm{border-color:rgba(226,87,76,.45);background:var(--danger-dim);color:var(--danger)}
+  .confirm-actions .danger-confirm:hover{background:rgba(226,87,76,.22)}
+
+  @media (max-width:420px){
+    .list-wrap{width:min(94vw,480px)}
+    .account-tools{gap:.4rem}
+    .sort-btn{padding:0 .65rem}
+    .account-card{padding:.9rem}
+    .account-card-code{font-size:1.35rem}
+  }
+  .list-topbar{ margin-bottom:1.1rem; }
+
+  .accounts{ display:flex; flex-direction:column; gap:0.85rem; }
+
+  .account-card{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:
+      "info otp"
+      "actions actions";
+    align-items:center;
+    column-gap:1rem;
+    row-gap:.7rem;
+    background:linear-gradient(180deg, var(--panel-2), var(--panel));
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:1rem 1.1rem;
+    cursor:pointer;
+    transition:border-color .2s ease, transform .2s ease;
+  }
+  .account-card:hover{ border-color:rgba(242,169,59,0.4); transform:translateY(-1px); }
+
+  .account-card-info{ min-width:0; width:100%; }
+  .account-card-name-row{ display:flex; align-items:flex-start; gap:.4rem; min-width:0; }
+  .account-card-name-stack{ min-width:0; flex:1; }
+  .account-card-name{ display:block; font-weight:700; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .account-card-date{ display:block; margin-top:.08rem; font-size:0.66rem; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .account-card-meta{ display:block; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  .fav-heart{
+    flex-shrink:0;
+    font-size:1rem;
+    line-height:1;
+    cursor:pointer;
+    filter:grayscale(1) opacity(.55);
+    transition:transform .15s ease, filter .15s ease;
+    display:inline-block;
+  }
+  .fav-heart.is-fav{ filter:none; }
+  .fav-heart:hover{ transform:scale(1.12); }
+  .fav-heart.fav-pop{ animation:favPop .32s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes favPop{
+    0%{ transform:scale(1); }
+    35%{ transform:scale(1.5) rotate(-8deg); }
+    65%{ transform:scale(0.92) rotate(4deg); }
+    100%{ transform:scale(1); }
+  }
+
+  .account-card-wrap{ position:relative; border-radius:16px; overflow:hidden; }
+  .account-card-wrap .account-card{ position:relative; z-index:2; touch-action:pan-y; }
+  .swipe-delete-bg{
+    position:absolute;
+    inset:0;
+    z-index:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:.4rem;
+    background:linear-gradient(180deg, rgba(226,87,76,.28), rgba(226,87,76,.2));
+    color:#fff;
+    font-weight:700;
+    font-size:.82rem;
+    border-radius:16px;
+    opacity:0;
+    pointer-events:none;
+  }
+
+  .undo-toast{
+    position:fixed;
+    left:50%;
+    bottom:1.4rem;
+    transform:translateX(-50%);
+    z-index:120;
+    display:flex;
+    align-items:center;
+    gap:.8rem;
+    max-width:min(92vw, 380px);
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:.7rem .8rem .7rem 1rem;
+    box-shadow:0 14px 32px rgba(0,0,0,.45);
+    font-size:.76rem;
+  }
+  .undo-toast span{ color:var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .undo-toast button{
+    flex-shrink:0;
+    background:none;
+    border:0;
+    color:var(--amber);
+    font-weight:700;
+    font-size:.76rem;
+    letter-spacing:.03em;
+    cursor:pointer;
+    padding:.3rem .4rem;
+  }
+  .undo-toast button:hover{ color:var(--teal); }
+  .account-card-code{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:clamp(1.12rem,5.8vw,1.5rem);
+    font-weight:700;
+    letter-spacing:0.08em;
+    margin-top:0.2rem;
+    color:var(--amber);
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+    display:block;
+    line-height:1.15;
+  }
+
+  .account-card-ring{ position:relative; width:38px; height:38px; flex-shrink:0; }
+  .account-card-ring svg{ width:100%; height:100%; transform:rotate(-90deg); }
+  .account-card-ring .ring-track{ fill:none; stroke:rgba(255,255,255,0.08); stroke-width:4; }
+  .account-card-ring .ring-progress{ fill:none; stroke:var(--amber); stroke-width:4; stroke-linecap:round; transition:stroke-dashoffset 1s linear; }
+  .account-card-ring span{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:0.62rem; color:var(--text-dim); font-family:'IBM Plex Mono', monospace;
+  }
+
+
+  @media (max-width:430px){
+    .account-card{ grid-template-columns:minmax(0,1fr) auto; column-gap:.55rem; padding:.85rem .8rem; }
+    .account-card-otp{ gap:.35rem; }
+    .account-card-ring{ width:38px; height:38px; }
+    .card-actions{ gap:.2rem; justify-content:flex-start; }
+  }
+
+  .account-card-info{ grid-area:info; min-width:0; width:100%; }
+  .account-card-otp{ grid-area:otp; display:flex; align-items:center; gap:.55rem; justify-content:flex-end; min-width:max-content; }
+  .card-actions{ grid-area:actions; display:flex; justify-content:flex-end; align-items:center; gap:.3rem; }
+  .account-card-ring{ flex:0 0 auto; }
+  .account-card-code{ color:var(--otp-color,#7dd3fc) !important; }
+  .account-card-date{ color:#94a3b8 !important; }
+  .account-card-meta{ color:#a7b0be !important; }
+  .account-card .copy-btn{ color:#86efac; }
+  .account-card .edit-btn{ color:#c4b5fd; }
+  .account-card .delete-btn{ color:#fda4af; }
+  .account-card .eye-btn{ color:#67e8f9; }
+  .account-card-ring circle:last-child{ stroke:#67e8f9 !important; }
+  .account-card-ring text{ fill:#c4b5fd !important; }
+  .empty{ text-align:center; padding:4rem 1rem; color:var(--text-dim); }
+  .empty-icon{ font-size:2.2rem; margin-bottom:0.8rem; }
+  .empty h2{ color:var(--text); font-size:1.05rem; margin-bottom:0.4rem; }
+  .empty p{ font-size:0.85rem; }
+
+  .fab{
+    position:fixed; right:1.3rem; bottom:1.6rem;
+    width:56px; height:56px; border:none; border-radius:16px;
+    background:var(--amber); color:#1a1305; font-size:1.7rem;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; box-shadow:0 12px 26px -8px rgba(0,0,0,0.6);
+    transition:transform .2s ease, filter .2s ease;
+  }
+  .fab:hover{ transform:translateY(-2px); filter:brightness(1.06); }
+
+  .back-btn{
+    width:34px; height:34px; border-radius:10px; border:1px solid var(--border);
+    background:rgba(255,255,255,0.02); color:var(--text); font-size:1.1rem;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    transition:border-color .2s ease, background .2s ease;
+  }
+  .back-btn:hover{ border-color:var(--amber); }
+
+  .save-row{ display:flex; gap:0.6rem; margin-top:0.9rem; }
+  .save-btn, .delete-btn{
+    flex:1; height:46px; border-radius:10px; font-weight:700; font-size:0.85rem;
+    cursor:pointer; transition:filter .15s ease, transform .1s ease;
+  }
+  .save-btn{ background:var(--amber); color:#1a1305; border:none; }
+  .save-btn:hover{ filter:brightness(1.08); }
+  .save-btn:active{ transform:translateY(1px); }
+  .delete-btn{ background:transparent; color:var(--danger); border:1px solid rgba(226,87,76,0.4); }
+  .delete-btn:hover{ background:var(--danger-dim); }
+
+  /* ---------- Phase 4: Security ---------- */
+  .security-note{color:var(--text-dim);font-size:.68rem;line-height:1.5;margin:.15rem 0 .7rem}
+  .security-select{height:34px;min-width:92px;padding:0 .5rem;border:1px solid var(--border);border-radius:9px;background:rgba(255,255,255,.03);color:var(--text);font:600 .7rem 'IBM Plex Sans',sans-serif;outline:none}
+  .security-select:focus{border-color:var(--amber)}
+  .lock-btn{width:42px;height:34px;border-radius:9px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text);font:700 .72rem 'IBM Plex Sans',sans-serif;cursor:pointer}
+  .lock-btn:hover{border-color:var(--amber);color:var(--amber);background:var(--amber-dim)}
+  .lock-btn[hidden]{display:none}
+  .lock-screen{position:fixed;inset:0;z-index:300;display:flex;align-items:center;justify-content:center;padding:1rem;background:rgba(8,10,14,.96);opacity:0;visibility:hidden;pointer-events:none;transition:.2s ease}
+  #recoveryEntryScreen, #recoveryCodeScreen{ z-index:310; }
+  .global-toast{
+    position:fixed;
+    left:50%;
+    bottom:1.4rem;
+    transform:translateX(-50%);
+    z-index:400;
+    max-width:min(90vw, 360px);
+    text-align:center;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:0.74rem;
+    font-weight:600;
+    letter-spacing:0.04em;
+    color:var(--amber);
+    background:var(--panel);
+    border:1px solid rgba(242,169,59,0.45);
+    border-radius:10px;
+    padding:0.55rem 0.9rem;
+    box-shadow:0 12px 30px rgba(0,0,0,0.4);
+    pointer-events:none;
+    animation:toastPop .18s ease;
+  }
+  .lock-screen.open{opacity:1;visibility:visible;pointer-events:auto}
+  .lock-card{width:min(360px,100%);background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:1.25rem;box-shadow:0 25px 70px rgba(0,0,0,.55);text-align:center}
+  .lock-logo{width:48px;height:48px;border-radius:13px;background:var(--amber);color:#1a1305;display:flex;align-items:center;justify-content:center;font-weight:900;margin:0 auto .8rem}
+  .lock-card h2{font-size:1rem;margin-bottom:.35rem}.lock-card p{font-size:.7rem;color:var(--text-dim);line-height:1.5;margin-bottom:1rem}
+  .pin-input{width:100%;height:46px;border:1px solid var(--border);border-radius:11px;background:rgba(0,0,0,.2);color:var(--text);text-align:center;letter-spacing:.35em;font:700 1.05rem 'IBM Plex Mono',monospace;outline:none}
+  .pin-input:focus{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-dim)}
+  .lock-submit{width:100%;height:44px;margin-top:.65rem;border:0;border-radius:10px;background:var(--amber);color:#1a1305;font:700 .8rem 'IBM Plex Sans',sans-serif;cursor:pointer}
+  .lock-error{min-height:1.05rem;margin-top:.55rem;color:var(--danger);font-size:.68rem}
+  .lock-link{margin-top:.65rem;background:none;border:0;color:var(--text-dim);font-size:.67rem;cursor:pointer}.lock-link:hover{color:var(--amber)}
+  /* Hide-code system: no blur. Hidden OTPs are replaced with a neutral mask. */
+  body.hide-codes #codeDisplay, body.hide-codes #nextCode{filter:none;user-select:none;-webkit-user-select:none}
+  .account-card-code.is-hidden{color:var(--text-dim);letter-spacing:.08em;opacity:.9;white-space:nowrap}
+  .eye-action{
+    width:36px;height:34px;border-radius:9px;border:1px solid var(--border);
+    background:rgba(255,255,255,.03);color:var(--text-dim);display:flex;
+    align-items:center;justify-content:center;cursor:pointer;padding:0;
+    transition:color .15s ease,border-color .15s ease,background .15s ease;
+  }
+  .eye-action:hover,.eye-action:focus-visible{color:var(--amber);border-color:var(--amber);background:var(--amber-dim);outline:none}
+  .eye-action svg{width:18px;height:18px;pointer-events:none}
+  .eye-action.revealed{color:var(--teal);border-color:rgba(79,182,166,.35);background:var(--teal-dim)}
+  .eye-action.revealed:hover,.eye-action.revealed:focus-visible{color:var(--teal);border-color:var(--teal)}
+  .copy-action{
+    width:36px;height:34px;border-radius:9px;border:1px solid var(--border);
+    background:rgba(255,255,255,.03);color:var(--text-dim);display:flex;
+    align-items:center;justify-content:center;cursor:pointer;padding:0;
+    transition:color .15s ease,border-color .15s ease,background .15s ease;
+  }
+  .copy-action:hover,.copy-action:focus-visible{color:var(--amber);border-color:var(--amber);background:var(--amber-dim);outline:none}
+  .copy-action svg{width:17px;height:17px;pointer-events:none}
+  .copy-action:disabled{opacity:.45;cursor:not-allowed}
+
+
+  /* Phase 6: device security */
+  .security-note{margin-top:.55rem;padding:.65rem .7rem;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.025);color:var(--text-dim);font-size:.68rem;line-height:1.45}
+  .security-badge{color:var(--teal);font-size:.68rem;font-weight:700}
+  .danger-btn{border-color:rgba(255,92,112,.35)!important;color:var(--danger)!important}
+
+/* Phase 6.1 — Recent Apps privacy screen */
+#privacyScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  background: #000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#privacyScreen.active { display: flex; }
+#privacyScreen .privacy-mark {
+  width: 58px; height: 58px; border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.16);
+  display:flex; align-items:center; justify-content:center;
+  color: rgba(255,255,255,.42); font-size: 25px;
+}
+html.privacy-active, html.privacy-active body { background:#000 !important; }
+html.privacy-active body > *:not(#privacyScreen) { visibility:hidden !important; }
+
+  .advanced-grid.phase7-grid{grid-template-columns:1fr 1fr;}
+  .advanced-grid.phase7-grid .full{grid-column:1/-1;}
+  .hotp-note{font-size:.68rem;color:var(--text-dim);margin:.2rem 0 .1rem;}
+  .counter-controls{display:flex;gap:.45rem;align-items:end;}
+  @media(max-width:430px){.advanced-grid.phase7-grid{grid-template-columns:1fr 1fr}.advanced-grid.phase7-grid .full{grid-column:1/-1;}}
+
+/* Phase 8.1: never wrap account-list OTP codes */
+.account-card-code{
+  white-space:nowrap !important;
+  display:inline-block !important;
+  min-width:max-content;
+  line-height:1.15;
+}
+.account-card-info{min-width:0;}
+.account-card-code-wrap{min-width:0;overflow:hidden;}
+</style>
+</head>
+<body>
+<div id="privacyScreen" aria-hidden="true" aria-label="Privacy screen"><div class="privacy-mark">🔒</div></div>
+<div class="global-toast" id="globalToast" hidden></div>
+
+
+<!-- =========================
+     ACCOUNT LIST SCREEN
+========================= -->
+<div class="stage" id="listStage">
+  <div class="list-wrap">
+
+    <div class="list-topbar">
+      <div style="display:flex;align-items:center;gap:.65rem;">
+        <button class="menu-btn" id="menuBtn" type="button" aria-label="Open navigation menu" aria-expanded="false" title="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
+        </button>
+        <div>
+          <span class="eyebrow">Time-Based One-Time Password</span>
+          <h1 class="title" style="margin-top:0.3rem;">Accounts</h1>
+        </div>
+      </div>
+    </div>
+
+    <div class="account-tools">
+      <div class="account-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input id="accountSearch" type="search" placeholder="Search accounts…" autocomplete="off">
+      </div>
+      <button class="sort-btn" id="sortBtn" type="button" title="Sort accounts">A–Z</button>
+    </div>
+
+    <div class="accounts" id="accountsContainer"></div>
+
+    <div class="empty" id="emptyState" hidden>
+      <div class="empty-icon">🔐</div>
+      <h2>No accounts yet</h2>
+      <p>Add an account to start generating real codes.</p>
+    </div>
+
+    <button class="fab" id="addAccountBtn" type="button" aria-label="Add account">+</button>
+    <div class="undo-toast" id="undoToast" hidden>
+      <span id="undoToastText">Account deleted.</span>
+      <button type="button" id="undoToastBtn">UNDO</button>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     HAMBURGER NAVIGATION
+========================= -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<aside class="nav-drawer" id="navDrawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div class="drawer-brand">
+      <div class="drawer-logo">✓</div>
+      <div><strong>Authenticator</strong><span>Secure local TOTP</span></div>
+    </div>
+    <button class="drawer-close" id="drawerClose" type="button" aria-label="Close menu">×</button>
+  </div>
+
+  <div class="drawer-section">
+    <div class="drawer-label">Navigation</div>
+    <button class="drawer-item active" id="drawerAccounts" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h4"/></svg>
+      Accounts
+    </button>
+    <button class="drawer-item" id="drawerAddAccount" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Add account
+    </button>
+    <button class="drawer-item" id="drawerBackup" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 19h14"/></svg>
+      Backup &amp; restore
+    </button>
+  </div>
+
+  <div class="drawer-section">
+    <div class="drawer-label">Application</div>
+    <button class="drawer-item" id="drawerSettings" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="m19.4 15 .1.1a2 2 0 0 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.2a2 2 0 0 1-4 0v-.2a2 2 0 0 0-3.4-1.4l-.1.1A2 2 0 0 1 3 15.1l.1-.1a2 2 0 0 0-1.4-3.4h-.2a2 2 0 0 1 0-4h.2A2 2 0 0 0 3.1 4.2L3 4.1A2 2 0 0 1 5.8 1.3l.1.1a2 2 0 0 0 3.4-1.4v-.2a2 2 0 0 1 4 0V0a2 2 0 0 0 3.4 1.4l.1-.1A2 2 0 0 1 19.6 4l-.1.1A2 2 0 0 0 20.9 7h.2a2 2 0 0 1 0 4h-.2a2 2 0 0 0-1.5 4Z"/></svg>
+      Settings
+    </button>
+    <button class="drawer-item" id="drawerAbout" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7h.01"/></svg>
+      About
+    </button>
+  </div>
+
+  <div class="drawer-section" style="padding-top:.7rem">
+    <button class="drawer-item" id="drawerLock" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      Log out
+    </button>
+  </div>
+
+  <div class="drawer-footer"><b>Authenticator</b><br>Codes are computed locally in your browser.</div>
+</aside>
+
+<!-- Settings sheet -->
+<div class="settings-panel" id="settingsPanel" aria-hidden="true">
+  <div class="settings-card">
+    <div class="settings-head"><div style="display:flex;align-items:center;gap:.65rem"><button class="back-btn" id="settingsBack" type="button" aria-label="Back to accounts">←</button><h2>Settings</h2></div><button class="drawer-close" id="settingsClose" type="button" aria-label="Close settings">×</button></div>
+    <div class="account-search" style="margin-bottom:.7rem;position:sticky;top:2.6rem;z-index:4;background:var(--panel);padding-top:.35rem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+      <input id="settingsSearch" type="search" placeholder="Search settings…" autocomplete="off">
+    </div>
+    <div id="settingsRowsWrap">
+    <div class="settings-row" data-keywords="dark appearance theme interface style"><div><b>Dark appearance</b><small>Use the current dark interface style.</small></div><button class="theme-toggle on" id="themeToggle" type="button" aria-label="Toggle theme"></button></div>
+    <div class="settings-row" data-keywords="local storage browser"><div><b>Local storage</b><small>Accounts remain stored locally in this browser.</small></div><span style="color:var(--amber);font-size:.7rem;font-weight:700">LOCAL</span></div>
+    <div class="settings-row" data-keywords="hide codes privacy eye reveal"><div><b>Hide codes</b><small>Hide OTP codes. Use the eye on an account to view that code temporarily.</small></div><button class="theme-toggle" id="hideCodesToggle" type="button" aria-label="Toggle hidden codes"></button></div>
+    <div class="settings-row" data-keywords="app lock pin password unlock"><div><b>App lock</b><small>Require a PIN before showing your accounts.</small></div><div style="display:flex;gap:.4rem;align-items:center"><button class="lock-btn" id="pinSetupBtn" type="button">Set PIN</button><button class="lock-btn" id="pinDisableBtn" type="button" hidden>Disable</button></div></div>
+    <div class="settings-row" data-keywords="encrypted vault pin aes-gcm encryption"><div><b>Encrypted vault</b><small>TOTP secrets are encrypted at rest with your PIN using AES-GCM.</small></div><span id="vaultStatus" style="color:var(--amber);font-size:.68rem;font-weight:700">PIN REQUIRED</span></div>
+    <div class="settings-row" data-keywords="recovery code forgot pin regenerate"><div><b>Recovery code</b><small>Lets you get back in if you forget your PIN. Not shown again after setup — regenerate a new one if you lost it.</small></div><button class="lock-btn" id="viewRecoveryBtn" type="button" hidden>Regenerate</button></div>
+    <div class="settings-row" data-keywords="auto-lock autolock inactivity timeout"><div><b>Auto-lock</b><small>Lock automatically after inactivity.</small></div><select class="security-select" id="autoLockSelect"><option value="0">Never</option><option value="1">1 min</option><option value="5">5 min</option><option value="15">15 min</option></select></div>
+    <div class="settings-row" data-keywords="clipboard copy clear"><div><b>Clipboard</b><small>OTP copies are cleared automatically.</small></div><span style="color:var(--amber);font-size:.7rem;font-weight:700">30 SEC</span></div>
+    <div class="settings-row" data-keywords="storage protection encryption backup password aes-gcm"><div><b>Storage protection</b><small>When a PIN is enabled, account data is encrypted at rest with AES-GCM. Encrypted backups are protected by a separate backup password.</small></div><span style="color:var(--teal);font-size:.68rem;font-weight:700">AES-GCM</span></div>
+    <div class="settings-row" data-keywords="lock background app leaves screen"><div><b>Lock when app leaves screen</b><small>Immediately lock when the browser/app is backgrounded.</small></div><button class="theme-toggle" id="backgroundLockToggle" type="button" aria-label="Toggle background lock"></button></div>
+    <div class="settings-row" data-keywords="biometric fingerprint face id verification"><div><b>Biometric verification</b><small>Use the device's biometric/security credential as an additional unlock gate when supported by this browser.</small></div><div style="display:flex;gap:.4rem;align-items:center"><span class="security-badge" id="biometricStatus">NOT SET</span><button class="lock-btn" id="biometricBtn" type="button">Set up</button></div></div>
+    <div class="security-note" data-keywords="device security biometric https localhost android keystore"><b>Device security:</b> browser biometric support depends on HTTPS/localhost and the device/browser. Android native apps can later use Android Keystore + BiometricPrompt for stronger device-bound protection.</div>
+    <div class="settings-row" data-keywords="backup restore export import json"><div><b>Backup &amp; restore</b><small>Export your accounts to a JSON backup or restore them later.</small></div><button class="card-action" id="settingsBackup" type="button" title="Backup & restore">⇄</button></div>
+    </div>
+    <div id="settingsNoResults" class="empty" hidden style="padding:2.2rem 1rem"><div class="empty-icon">🔎</div><h2>No settings found</h2><p>Try a different search term.</p></div>
+  </div>
+</div>
+
+<!-- About dialog -->
+<div class="about-panel" id="aboutPanel" aria-hidden="true">
+  <div class="about-card">
+    <div class="drawer-logo">✓</div>
+    <h2>Authenticator</h2>
+    <p>Time-Based and counter-based one-time password authenticator with TOTP/HOTP, SHA-1/SHA-256/SHA-512 and QR import.</p>
+    <div class="about-meta">
+      <p><b>Version</b> 8.1.0</p>
+      <p>Developed by <b>Infinity Technology</b></p>
+      <p>Developer: <b>Kingoli</b></p>
+      <p>Built using AI-assisted development (AI commands)</p>
+      <p class="about-copyright">© 2026 Infinity Technology. All rights reserved.</p>
+    </div>
+    <button class="about-close-btn" id="aboutClose" type="button">Close</button>
+  </div>
+</div>
+
+<!-- Backup & restore dialog -->
+<div class="backup-panel" id="backupPanel" aria-hidden="true">
+  <div class="backup-card">
+    <div class="backup-head"><h2>Backup &amp; restore</h2><button class="drawer-close" id="backupClose" type="button">×</button></div>
+    <div class="backup-note">Create an encrypted portable backup of your accounts, or restore an encrypted backup on this or another device.</div>
+    <div class="backup-warning"><b>Security:</b> the backup is encrypted with a separate password using PBKDF2 + AES-GCM. The password is never stored by this app. Keep the password safe; without it, the backup cannot be restored.</div>
+    <div class="backup-actions">
+      <button type="button" class="backup-action primary" id="exportBackup">Export backup</button>
+      <button type="button" class="backup-action" id="importBackup">Import backup</button>
+    </div>
+    <input id="backupFileInput" type="file" accept="application/json,.json" hidden>
+    <div class="backup-status" id="backupStatus" aria-live="polite"></div>
+  </div>
+</div>
+
+<!-- Backup protection choice -->
+<div class="pin-modal" id="backupChoicePanel" aria-hidden="true">
+  <div class="lock-card backup-password-card">
+    <h2>Choose backup protection</h2>
+    <p>Choose whether this backup should be protected with a password.</p>
+    <div class="backup-warning"><b>Encrypted backup:</b> the backup password is never stored. If you lose the password, this encrypted backup cannot be restored. Keep the password somewhere safe.</div>
+    <div class="backup-actions">
+      <button type="button" class="backup-action primary" id="chooseEncryptedBackup">🔒 Password protected</button>
+      <button type="button" class="backup-action" id="choosePlainBackup">⚠ Without password</button>
+    </div>
+    <button class="lock-link" id="backupChoiceCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<!-- Secret-key-changed confirmation (editing an existing account) -->
+<div class="pin-modal" id="secretChangedPanel" aria-hidden="true">
+  <div class="lock-card backup-password-card">
+    <div class="lock-logo">⚠️</div>
+    <h2>Secret key changed</h2>
+    <p>The secret key for <b id="secretChangedName"></b> is different from what was saved. Overwriting will make the old secret unusable — any codes it generates will stop matching your account.</p>
+    <div class="backup-warning">If this new key is actually for a <b>different</b> account, save it separately instead of overwriting.</div>
+    <div class="backup-actions">
+      <button type="button" class="backup-action primary" id="secretChangedSaveNew">Save as new account</button>
+      <button type="button" class="backup-action" id="secretChangedOverwrite">Overwrite existing</button>
+    </div>
+    <button class="lock-link" id="secretChangedCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<!-- Encrypted backup password dialog -->
+<div class="pin-modal" id="backupPasswordPanel" aria-hidden="true">
+  <div class="lock-card backup-password-card">
+    <div class="lock-logo">🔐</div>
+    <h2 id="backupPasswordTitle">Backup password</h2>
+    <p id="backupPasswordDescription">Use a separate password to encrypt this backup. The password is not stored.</p>
+    <form id="backupPasswordForm">
+      <input id="backupPassword" class="pin-input backup-password-input" type="password" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Backup password" aria-label="Backup password" inputmode="text">
+      <input id="backupPasswordConfirm" class="pin-input backup-password-input" type="password" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Confirm password" aria-label="Confirm backup password" inputmode="text" hidden>
+      <button class="lock-submit" id="backupPasswordSubmit" type="submit">ENCRYPT BACKUP</button>
+    </form>
+    <div class="lock-error" id="backupPasswordError" aria-live="polite"></div>
+    <button class="lock-link" id="backupPasswordCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<div class="confirm-panel" id="deleteConfirm" aria-hidden="true">
+  <div class="confirm-card">
+    <h3>Delete account?</h3>
+    <p id="deleteConfirmText">This account and its stored secret will be removed from this browser.</p>
+    <div class="confirm-actions">
+      <button type="button" id="deleteCancel">Cancel</button>
+      <button type="button" class="danger-confirm" id="deleteConfirmBtn">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     GENERATOR SCREEN
+     (exact original Code Instrument
+     interface + engine — used both to
+     add a new account and to view/edit
+     an existing one)
+========================= -->
+<div class="stage" id="generatorStage" hidden>
+  <div class="card">
+    <div class="card-header">
+      <button type="button" class="back-btn" id="backBtn" aria-label="Back to accounts">←</button>
+      <div class="mode-pill idle" id="modePill"><span class="dot"></span><span id="modeLabel">IDLE</span></div>
+    </div>
+    <h1 class="title">Code Instrument</h1>
+
+    <label class="field">
+      <span class="field-label">Account label</span>
+      <input id="nameInput" type="text" placeholder="e.g. Google — you@gmail.com (optional)" autocomplete="off" />
+    </label>
+
+    <label class="field">
+      <span class="field-label">Secret key</span>
+      <div class="secret-row">
+        <input id="secretInput" type="text" placeholder="e.g. JBSWY3DPEHPK3PXP" autocomplete="off" spellcheck="false" />
+        <button type="button" class="scan-btn" id="scanBtn" aria-label="Scan QR code" title="Scan QR code">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="4" height="4"/><rect x="13" y="13" width="4" height="4"/></svg>
+        </button>
+        <button type="button" class="play-btn" id="playBtn" disabled aria-label="Start generator" title="Start generator">▶</button>
+      </div>
+      <input type="file" accept="image/*" capture="environment" id="qrFileInput" hidden>
+      <input type="file" accept="image/*" id="qrImportInput" hidden>
+
+      <p class="scan-status" id="scanStatus" hidden></p>
+
+      <div class="scan-inline" id="scanInline" hidden>
+        <div class="scan-viewport">
+          <video id="scanVideo" playsinline muted></video>
+          <div class="scan-frame"><div class="scan-line"></div></div>
+          <button type="button" class="torch-btn" id="torchBtn" aria-label="Toggle flashlight" title="Flashlight" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6l1 5H8l1-5Z"/><path d="M8 7h8l-1 8-2 2v5h-2v-5l-2-2-1-8Z"/></svg>
+          </button>
+          <button type="button" class="flip-btn" id="flipCamBtn" aria-label="Switch camera" title="Switch camera">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2.1l4 4-4 4"/><path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8"/><path d="M7 21.9l-4-4 4-4"/><path d="M21 11.8v2a4 4 0 0 1-4 4H4.2"/></svg>
+          </button>
+          <p class="scan-help">Point the camera at a QR code. It will be detected automatically.</p>
+        </div>
+      </div>
+
+      <p class="scan-result" id="scanResult" hidden></p>
+
+      <span class="field-hint" id="secretHint">Enter the full Base32 secret, then press play (or hit Enter) — or tap the scan icon to scan a QR code. <button type="button" class="gen-link" id="genBtn">Or generate a test secret</button> · <button type="button" class="gen-link" id="importBtn">Import an image instead</button></span>
+    </label>
+
+    <details class="advanced">
+      <summary>Advanced settings</summary>
+      <div class="advanced-grid phase7-grid">
+        <label class="field-sm">
+          <span class="field-label">Type</span>
+          <select id="typeSelect">
+            <option value="totp" selected>TOTP</option>
+            <option value="hotp">HOTP</option>
+          </select>
+        </label>
+        <label class="field-sm">
+          <span class="field-label">Digits</span>
+          <select id="digitsSelect">
+            <option value="6" selected>6 digits</option>
+            <option value="8">8 digits</option>
+          </select>
+        </label>
+        <label class="field-sm">
+          <span class="field-label">Algorithm</span>
+          <select id="algorithmSelect">
+            <option value="SHA-1" selected>SHA-1</option>
+            <option value="SHA-256">SHA-256</option>
+            <option value="SHA-512">SHA-512</option>
+          </select>
+        </label>
+        <label class="field-sm" id="periodField">
+          <span class="field-label">Period (seconds)</span>
+          <input id="periodInput" type="number" min="1" max="300" value="30" />
+        </label>
+        <label class="field-sm" id="counterField" hidden>
+          <span class="field-label">HOTP Counter</span>
+          <input id="counterInput" type="number" min="0" step="1" value="0" />
+        </label>
+        <div class="hotp-note full" id="algorithmNote">TOTP: code changes automatically according to the selected period and current time.</div>
+        <button type="button" class="lock-btn full" id="counterNextBtn" hidden>Use next HOTP counter</button>
+      </div>
+    </details>
+
+    <div class="datetime-row">
+      <label class="field">
+        <span class="field-label">Date &amp; time</span>
+        <input id="datetimeInput" type="datetime-local" step="1" />
+      </label>
+      <button id="nowBtn" class="now-btn" type="button">Now</button>
+    </div>
+
+    <div class="dial-wrap">
+      <svg viewBox="0 0 200 200" class="dial-ring">
+        <circle class="ring-track" cx="100" cy="100" r="90"></circle>
+        <g id="tickMarks"></g>
+        <circle class="ring-progress" id="ringProgress" cx="100" cy="100" r="90"></circle>
+      </svg>
+      <div class="dial-center">
+        <div class="code-display" id="codeDisplay">– – – – – –</div>
+        <div class="code-sub" id="codeSub">enter a secret to begin</div>
+      </div>
+    </div>
+
+    <div class="next-row">
+      <span class="next-label">Next</span>
+      <span class="next-code" id="nextCode">— — —</span>
+    </div>
+
+    <p class="copy-toast" id="copyToast" hidden>Copied</p>
+
+    <p class="footnote">RFC 6238 · HMAC-SHA1 · computed locally in your browser — nothing is sent anywhere.</p>
+
+    <div class="save-row">
+      <button type="button" class="save-btn" id="saveBtn">Save account</button>
+      <button type="button" class="delete-btn" id="deleteBtn" hidden>Delete</button>
+    </div>
+  </div>
+
+  <canvas id="scanCanvas" style="display:none;"></canvas>
+
+</div>
+
+<!-- Phase 4: App lock overlay -->
+<div class="lock-screen" id="lockScreen" aria-hidden="true">
+  <div class="lock-card">
+    <div class="lock-logo">🔒</div>
+    <h2 id="lockTitle">Authenticator locked</h2>
+    <p id="lockDescription">Enter your PIN to unlock your accounts and codes.</p>
+    <form id="unlockForm">
+      <input id="unlockPin" class="pin-input" type="password" inputmode="numeric" maxlength="8" minlength="4" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" name="app-pin" placeholder="••••" aria-label="PIN">
+      <button class="lock-submit" id="lockSubmitBtn" type="submit">UNLOCK</button>
+    </form>
+    <div class="lock-error" id="lockError" aria-live="polite"></div>
+    <button class="lock-link" id="lockCancelSetup" type="button" hidden>Cancel PIN setup</button>
+    <button class="lock-link" id="lockUseRecovery" type="button" hidden>Forgot PIN? Use recovery code</button>
+    <button class="lock-link" id="lockResetApp" type="button">Can't unlock? Reset app data</button>
+  </div>
+</div>
+
+<!-- Recovery code entry (forgot PIN) -->
+<div class="pin-modal" id="recoveryEntryScreen" aria-hidden="true">
+  <div class="lock-card backup-password-card">
+    <div class="lock-logo">🗝️</div>
+    <h2>Enter recovery code</h2>
+    <p>Enter the recovery code you saved when you set up your PIN. It looks like XXXXX-XXXXX-XXXXX-XXXXX.</p>
+    <form id="recoveryEntryForm">
+      <input id="recoveryCodeInput" class="pin-input backup-password-input" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" aria-label="Recovery code" inputmode="text">
+      <button class="lock-submit" id="recoveryEntrySubmit" type="submit">VERIFY CODE</button>
+    </form>
+    <div class="lock-error" id="recoveryEntryError" aria-live="polite"></div>
+    <button class="lock-link" id="recoveryEntryCancel" type="button">Cancel</button>
+  </div>
+</div>
+
+<!-- Recovery code display (shown once, after setup / PIN reset via recovery) -->
+<div class="pin-modal" id="recoveryCodeScreen" aria-hidden="true">
+  <div class="lock-card backup-password-card">
+    <div class="lock-logo">🗝️</div>
+    <h2>Save your recovery code</h2>
+    <p>If you ever forget your PIN, this code is the <b>only</b> way back into your accounts. It is not stored anywhere — write it down or save it in a password manager now.</p>
+    <div class="recovery-code-display" id="recoveryCodeValue"></div>
+    <button type="button" class="backup-action" id="recoveryCodeCopy" style="width:100%;margin-bottom:.8rem">Copy code</button>
+    <div class="backup-warning">This code will not be shown again. If you lose both your PIN and this code, your accounts cannot be recovered — only a full app reset will be possible.</div>
+    <label class="recovery-confirm-row">
+      <input type="checkbox" id="recoveryCodeConfirm">
+      <span>I've saved this recovery code somewhere safe</span>
+    </label>
+    <button class="lock-submit" id="recoveryCodeContinue" type="button" disabled>CONTINUE</button>
+  </div>
+</div>
+
+<script>
+  "use strict";
+
+  /* ---------- SHA-1 (pure JS, no dependency on Web Crypto) ---------- */
+  function rotl(n, s){ return ((n << s) | (n >>> (32 - s))) >>> 0; }
+
+  function sha1(bytes){
+    const msgLen = bytes.length;
+    const bitLen = msgLen * 8;
+    const totalLen = (((msgLen + 9 + 63) >> 6) << 6);
+    const padded = new Uint8Array(totalLen);
+    padded.set(bytes);
+    padded[msgLen] = 0x80;
+    const dv = new DataView(padded.buffer);
+    const lenPos = totalLen - 8;
+    dv.setUint32(lenPos, Math.floor(bitLen / 0x100000000), false);
+    dv.setUint32(lenPos + 4, bitLen >>> 0, false);
+
+    let h0=0x67452301, h1=0xEFCDAB89, h2=0x98BADCFE, h3=0x10325476, h4=0xC3D2E1F0;
+    const w = new Uint32Array(80);
+
+    for (let chunk=0; chunk<totalLen; chunk+=64){
+      for (let i=0;i<16;i++) w[i] = dv.getUint32(chunk + i*4, false);
+      for (let i=16;i<80;i++) w[i] = rotl(w[i-3]^w[i-8]^w[i-14]^w[i-16], 1);
+
+      let a=h0,b=h1,c=h2,d=h3,e=h4;
+      for (let i=0;i<80;i++){
+        let f,k;
+        if (i<20){ f=(b&c)|((~b)&d); k=0x5A827999; }
+        else if (i<40){ f=b^c^d; k=0x6ED9EBA1; }
+        else if (i<60){ f=(b&c)|(b&d)|(c&d); k=0x8F1BBCDC; }
+        else { f=b^c^d; k=0xCA62C1D6; }
+        const temp = (rotl(a,5) + f + e + k + w[i]) >>> 0;
+        e=d; d=c; c=rotl(b,30); b=a; a=temp;
+      }
+      h0=(h0+a)>>>0; h1=(h1+b)>>>0; h2=(h2+c)>>>0; h3=(h3+d)>>>0; h4=(h4+e)>>>0;
+    }
+
+    const out = new Uint8Array(20);
+    const odv = new DataView(out.buffer);
+    odv.setUint32(0,h0,false); odv.setUint32(4,h1,false); odv.setUint32(8,h2,false);
+    odv.setUint32(12,h3,false); odv.setUint32(16,h4,false);
+    return out;
+  }
+
+  function hmacSha1(key, message){
+    const blockSize = 64;
+    let k = key;
+    if (k.length > blockSize) k = sha1(k);
+    const padded = new Uint8Array(blockSize);
+    padded.set(k);
+    const ipad = new Uint8Array(blockSize);
+    const opad = new Uint8Array(blockSize);
+    for (let i=0;i<blockSize;i++){
+      ipad[i] = padded[i] ^ 0x36;
+      opad[i] = padded[i] ^ 0x5c;
+    }
+    const inner = new Uint8Array(blockSize + message.length);
+    inner.set(ipad); inner.set(message, blockSize);
+    const innerHash = sha1(inner);
+    const outer = new Uint8Array(blockSize + 20);
+    outer.set(opad); outer.set(innerHash, blockSize);
+    return sha1(outer);
+  }
+
+  /* ---------- Base32 ---------- */
+  function base32Decode(input){
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    const clean = input.toUpperCase().replace(/[^A-Z2-7]/g, "");
+    let bits = "";
+    for (const c of clean){
+      const val = alphabet.indexOf(c);
+      if (val === -1) continue;
+      bits += val.toString(2).padStart(5, "0");
+    }
+    const bytes = [];
+    for (let i=0; i+8<=bits.length; i+=8){
+      bytes.push(parseInt(bits.substr(i,8), 2));
+    }
+    return new Uint8Array(bytes);
+  }
+
+  /* ---------- TOTP ---------- */
+  function counterToBytes(counter){
+    const buf = new Uint8Array(8);
+    const dv = new DataView(buf.buffer);
+    const high = Math.floor(counter / 0x100000000);
+    const low = counter % 0x100000000;
+    dv.setUint32(0, high, false);
+    dv.setUint32(4, low, false);
+    return buf;
+  }
+
+  function totpFromCounter(secretBytes, counter, digits){
+    const hash = hmacSha1(secretBytes, counterToBytes(counter));
+    const offset = hash[19] & 0xf;
+    const binCode = ((hash[offset] & 0x7f) << 24) |
+                     ((hash[offset+1] & 0xff) << 16) |
+                     ((hash[offset+2] & 0xff) << 8) |
+                     (hash[offset+3] & 0xff);
+    const otp = binCode % Math.pow(10, digits);
+    return otp.toString().padStart(digits, "0");
+  }
+
+  async function hmacWebCrypto(keyBytes, messageBytes, algorithm){
+    const key = await crypto.subtle.importKey("raw", keyBytes, {name:"HMAC", hash:{name:algorithm}}, false, ["sign"]);
+    return new Uint8Array(await crypto.subtle.sign("HMAC", key, messageBytes));
+  }
+
+  async function otpFromCounter(secretBytes, counter, digits, algorithm){
+    const alg = (algorithm || "SHA-1").toUpperCase();
+    const hash = alg === "SHA-1" ? hmacSha1(secretBytes, counterToBytes(counter)) : await hmacWebCrypto(secretBytes, counterToBytes(counter), alg);
+    const offset = hash[hash.length - 1] & 0x0f;
+    const binCode = ((hash[offset] & 0x7f) << 24) |
+                    ((hash[offset+1] & 0xff) << 16) |
+                    ((hash[offset+2] & 0xff) << 8) |
+                    (hash[offset+3] & 0xff);
+    return (binCode % Math.pow(10, digits)).toString().padStart(digits, "0");
+  }
+
+  async function generateOtp(account, nowMs){
+    const secretBytes = base32Decode(account.secret || "");
+    if (!secretBytes.length) return null;
+    const digits = account.digits === 8 ? 8 : 6;
+    const algorithm = account.algorithm || "SHA-1";
+    const type = (account.type || "totp").toLowerCase();
+    if (type === "hotp") {
+      const counter = Math.max(0, Number(account.counter) || 0);
+      return {code: await otpFromCounter(secretBytes, counter, digits, algorithm), remaining:null, period:null, counter:counter};
+    }
+    const period = Number(account.period) > 0 ? Number(account.period) : 30;
+    const nowSec = Math.floor((nowMs == null ? Date.now() : nowMs) / 1000);
+    const counter = Math.floor(nowSec / period);
+    const remaining = period - (((nowSec % period) + period) % period);
+    return {code: await otpFromCounter(secretBytes, counter, digits, algorithm), remaining:remaining, period:period, counter:counter};
+  }
+
+  function formatCode(code){
+    if (code.length === 6) return code.slice(0,3) + " " + code.slice(3);
+    if (code.length === 8) return code.slice(0,4) + " " + code.slice(4);
+    return code;
+  }
+
+  /* ---------- DOM ---------- */
+  const secretInput = document.getElementById("secretInput");
+  const genBtn = document.getElementById("genBtn");
+  const digitsSelect = document.getElementById("digitsSelect");
+  const periodInput = document.getElementById("periodInput");
+  const typeSelect = document.getElementById("typeSelect");
+  const algorithmSelect = document.getElementById("algorithmSelect");
+  const counterInput = document.getElementById("counterInput");
+  const counterField = document.getElementById("counterField");
+  const periodField = document.getElementById("periodField");
+  const algorithmNote = document.getElementById("algorithmNote");
+  const counterNextBtn = document.getElementById("counterNextBtn");
+  const datetimeInput = document.getElementById("datetimeInput");
+  const nowBtn = document.getElementById("nowBtn");
+  const modePill = document.getElementById("modePill");
+  const modeLabel = document.getElementById("modeLabel");
+  const codeDisplay = document.getElementById("codeDisplay");
+  const codeSub = document.getElementById("codeSub");
+  const nextCode = document.getElementById("nextCode");
+  const ringProgress = document.getElementById("ringProgress");
+  const copyToast = document.getElementById("copyToast");
+  const playBtn = document.getElementById("playBtn");
+  const tickMarks = document.getElementById("tickMarks");
+  const scanBtn = document.getElementById("scanBtn");
+  const qrFileInput = document.getElementById("qrFileInput");
+  const qrImportInput = document.getElementById("qrImportInput");
+  const importBtn = document.getElementById("importBtn");
+  const scanCanvas = document.getElementById("scanCanvas");
+  const scanStatus = document.getElementById("scanStatus");
+  const scanResult = document.getElementById("scanResult");
+  const scanInline = document.getElementById("scanInline");
+  const scanVideo = document.getElementById("scanVideo");
+  const flipCamBtn = document.getElementById("flipCamBtn");
+  const torchBtn = document.getElementById("torchBtn");
+
+  const CIRC = 2 * Math.PI * 90;
+
+  // build 12 decorative tick marks
+  for (let i=0;i<12;i++){
+    const angle = (i * 30) * Math.PI / 180;
+    const x1 = 100 + 82*Math.cos(angle), y1 = 100 + 82*Math.sin(angle);
+    const x2 = 100 + 88*Math.cos(angle), y2 = 100 + 88*Math.sin(angle);
+    const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+    line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+    line.setAttribute("class", "tick");
+    tickMarks.appendChild(line);
+  }
+
+  let mode = "idle";       // 'idle' | 'live' | 'custom'
+  let scanResultTimer = null;
+  let liveTimer = null;
+  let currentEpoch = Math.floor(Date.now()/1000);
+  let currentRawCode = "";
+  let currentUpcomingCode = "";
+  let programmatic = false;
+
+  // Colors the ring cycles through — one per 30s (or custom period) window.
+  // Add, remove, or reorder hex values here to change the palette.
+  const RING_COLORS = ["#f2a93b", "#4fb6a6", "#8f79e0", "#5ea8ff", "#e2574c", "#7dd17d"];
+  let lastCounter = null;
+  let colorIndex = 0;
+
+  function pad2(n){ return n.toString().padStart(2,"0"); }
+
+  function formatLocalDatetime(date){
+    return date.getFullYear() + "-" + pad2(date.getMonth()+1) + "-" + pad2(date.getDate()) +
+      "T" + pad2(date.getHours()) + ":" + pad2(date.getMinutes()) + ":" + pad2(date.getSeconds());
+  }
+
+  function getSecretBytes(){
+    const raw = secretInput.value.trim();
+    if (!raw) return null;
+    const bytes = base32Decode(raw);
+    if (bytes.length === 0) return null;
+    return bytes;
+  }
+
+  // Alternates direction each window: even counters drain (full -> empty),
+  // odd counters fill (empty -> full). Consecutive windows always meet at the
+  // same offset, so the ring never snaps/rebounds back to a start point —
+  // each new color just continues from exactly where the last one ended.
+  function ringOffsetFor(counter, remainder, period){
+    const frac = remainder / period;
+    return (counter % 2 === 0) ? CIRC * frac : CIRC * (1 - frac);
+  }
+
+  function updateModeUI(){
+    modePill.classList.remove("custom", "idle");
+    ringProgress.classList.remove("custom");
+    if (mode === "live"){
+      modeLabel.textContent = "LIVE";
+    } else if (mode === "custom"){
+      modePill.classList.add("custom");
+      ringProgress.classList.add("custom");
+      modeLabel.textContent = "CUSTOM";
+    } else {
+      modePill.classList.add("idle");
+      modeLabel.textContent = "IDLE";
+    }
+  }
+
+  // Shows a plain status message inside the big code circle (instead of a
+  // generated code) — used while the secret key field is empty or has not
+  // yet been confirmed with Play.
+  function showIdleMessage(text){
+    codeDisplay.classList.add("placeholder");
+    codeDisplay._cells = null;
+    codeDisplay.textContent = text;
+    codeSub.textContent = "";
+    nextCode.textContent = "— — —";
+    ringProgress.style.strokeDashoffset = CIRC.toFixed(2);
+    currentRawCode = "";
+    lastCounter = null;
+  }
+
+  // Renders a formatted code string ("123 456") into individually animated
+  // digit cells. Only digits that actually changed roll; unchanged digits
+  // and the separating space stay static. Each cell's roll is staggered by
+  // its index for a left-to-right wave effect.
+  function renderDigits(formatted){
+    codeDisplay.classList.remove("placeholder");
+    const chars = formatted.split("");
+
+    if (!codeDisplay._cells || codeDisplay._cells.length !== chars.length){
+      codeDisplay.innerHTML = "";
+      codeDisplay._cells = chars.map(function(ch){
+        const cell = document.createElement("span");
+        if (ch === " "){
+          cell.className = "digit-space";
+          cell.textContent = " ";
+        } else {
+          cell.className = "digit-cell";
+          cell.dataset.value = ch;
+          cell.innerHTML = '<span class="digit-new">' + ch + "</span>";
+        }
+        codeDisplay.appendChild(cell);
+        return cell;
+      });
+      return;
+    }
+
+    const cells = codeDisplay._cells;
+    chars.forEach(function(ch, i){
+      const cell = cells[i];
+      if (ch === " ") return;
+      const prevChar = cell.dataset.value;
+      if (prevChar === ch) return;
+
+      const delay = (i * 26) + "ms";
+      cell.innerHTML =
+        '<span class="digit-old" style="animation-delay:' + delay + '">' + prevChar + "</span>" +
+        '<span class="digit-new-anim" style="animation-delay:' + delay + '">' + ch + "</span>";
+      cell.dataset.value = ch;
+
+      const settleAfter = 340 + i * 26;
+      setTimeout(function(){
+        if (cell.dataset.value === ch){
+          cell.innerHTML = '<span class="digit-new">' + ch + "</span>";
+        }
+      }, settleAfter);
+    });
+  }
+
+  let renderSerial = 0;
+  async function render(){
+    const serial = ++renderSerial;
+    const digits = parseInt(digitsSelect.value, 10) || 6;
+    let period = parseInt(periodInput.value, 10);
+    if (!period || period < 1) period = 30;
+    const type = typeSelect.value === "hotp" ? "hotp" : "totp";
+    const algorithm = algorithmSelect.value || "SHA-1";
+
+    const secretBytes = getSecretBytes();
+    const remainder = ((currentEpoch % period) + period) % period;
+    const remaining = period - remainder;
+    const counter = type === "hotp" ? Math.max(0, Number(counterInput.value) || 0) : Math.floor(currentEpoch / period);
+
+    if (!secretBytes){
+      showIdleMessage(secretInput.value.trim().length === 0 ? "Waiting for key" : "Press play to generate");
+      return;
+    }
+    secretInput.classList.remove("invalid");
+
+    const code = await otpFromCounter(secretBytes, counter, digits, algorithm);
+    if (serial !== renderSerial) return;
+    const upcoming = type === "hotp" ? await otpFromCounter(secretBytes, counter + 1, digits, algorithm) : await otpFromCounter(secretBytes, counter + 1, digits, algorithm);
+    if (serial !== renderSerial) return;
+
+    if (counter !== lastCounter){
+      if (lastCounter !== null) colorIndex = (colorIndex + 1) % RING_COLORS.length;
+      lastCounter = counter;
+      const c = RING_COLORS[colorIndex];
+      ringProgress.style.stroke = c;
+      ringProgress.style.filter = "drop-shadow(0 0 5px " + c + "99)";
+    }
+
+    if (code !== currentRawCode){ currentRawCode = code; renderDigits(formatCode(code)); }
+    nextCode.textContent = formatCode(upcoming);
+    currentUpcomingCode = upcoming;
+
+    if (type === "hotp") {
+      ringProgress.style.strokeDashoffset = CIRC.toFixed(2);
+      ringProgress.classList.remove("pulse");
+      codeSub.textContent = "counter " + counter + " · " + algorithm;
+    } else if (mode === "live") {
+      const pulseThreshold = Math.max(1, Math.min(5, Math.floor(period / 4)));
+      ringProgress.style.strokeDashoffset = ringOffsetFor(counter, remainder, period).toFixed(2);
+      ringProgress.classList.toggle("pulse", remaining <= pulseThreshold);
+      codeSub.textContent = "expires in " + remaining + "s · " + algorithm;
+    } else {
+      ringProgress.style.strokeDashoffset = ringOffsetFor(counter, remainder, period).toFixed(2);
+      ringProgress.classList.remove("pulse");
+      const windowStart = new Date((counter*period) * 1000);
+      const windowEnd = new Date((counter*period + period) * 1000);
+      codeSub.textContent = "valid " + pad2(windowStart.getHours()) + ":" + pad2(windowStart.getMinutes()) + ":" + pad2(windowStart.getSeconds()) +
+        " – " + pad2(windowEnd.getHours()) + ":" + pad2(windowEnd.getMinutes()) + ":" + pad2(windowEnd.getSeconds()) + " · " + algorithm;
+    }
+  }
+
+  function tick(){
+    currentEpoch = Math.floor(Date.now()/1000);
+    if (document.activeElement !== datetimeInput){
+      programmatic = true;
+      datetimeInput.value = formatLocalDatetime(new Date());
+      programmatic = false;
+    }
+    render();
+  }
+
+  function startLive(){
+    mode = "live";
+    updateModeUI();
+    if (liveTimer) clearInterval(liveTimer);
+    tick();
+    liveTimer = setInterval(tick, 1000);
+  }
+
+  function stopLive(){
+    if (liveTimer){ clearInterval(liveTimer); liveTimer = null; }
+  }
+
+  function goCustom(){
+    stopLive();
+    mode = "custom";
+    updateModeUI();
+    const val = datetimeInput.value;
+    if (val){
+      const d = new Date(val);
+      if (!isNaN(d.getTime())){
+        currentEpoch = Math.floor(d.getTime()/1000);
+      }
+    }
+    render();
+  }
+
+  /* ---------- QR scanning (native camera photo capture — works everywhere, no https needed) ---------- */
+
+  function parseOtpAuth(text){
+    try{
+      if (/^otpauth:\/\//i.test(text)){
+        const url = new URL(text);
+        const secret = url.searchParams.get("secret");
+        if (!secret) return null;
+        let label = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+        const issuerParam = url.searchParams.get("issuer");
+        let issuer = issuerParam || "";
+        let account = label;
+        if (label.includes(":")){
+          const parts = label.split(":");
+          if (!issuer) issuer = parts[0].trim();
+          account = parts.slice(1).join(":").trim();
+        }
+        return {
+          secret: secret.replace(/\s+/g, ""),
+          digits: url.searchParams.get("digits"),
+          period: url.searchParams.get("period"),
+          algorithm: (url.searchParams.get("algorithm") || "SHA1").replace(/^SHA(?=\d)/i,"SHA-"),
+          type: (url.hostname || "totp").toLowerCase(),
+          counter: url.searchParams.get("counter"),
+          issuer: issuer,
+          account: account
+        };
+      }
+    } catch(e){ /* not a valid URL, fall through to raw-secret check */ }
+    const cleaned = text.toUpperCase().replace(/[^A-Z2-7]/g, "");
+    if (cleaned.length >= 16) return { secret: cleaned, digits:null, period:null, issuer:"", account:"" };
+    return null;
+  }
+
+  /* ---------- Success chime (synthesized, no audio file needed) ---------- */
+  let audioCtx = null;
+  function ensureAudioCtx(){
+    if (!audioCtx){
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx){
+        try{ audioCtx = new AudioCtx(); } catch(e){ audioCtx = null; }
+      }
+    }
+    if (audioCtx && audioCtx.state === "suspended"){
+      audioCtx.resume().catch(function(){});
+    }
+    return audioCtx;
+  }
+  function playTone(ctx, freq, startTime, duration, peakGain){
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(peakGain, startTime + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(startTime);
+    osc.stop(startTime + duration + 0.02);
+  }
+  function playSuccessChime(){
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    playTone(ctx, 880.00, now, 0.11, 0.15);        // A5
+    playTone(ctx, 1318.51, now + 0.09, 0.16, 0.17); // E6
+  }
+
+  function handleScanResult(text){
+    const parsed = parseOtpAuth(text);
+    if (!parsed || !parsed.secret){
+      scanStatus.hidden = false;
+      scanStatus.textContent = "That photo didn't contain a readable TOTP QR code — try again with it centered and in focus.";
+      return;
+    }
+    secretInput.value = parsed.secret;
+    generatedTestSecret = false;
+    secretInput.classList.remove("invalid");
+    if (parsed.digits === "6" || parsed.digits === "8") digitsSelect.value = parsed.digits;
+    if (parsed.period && parseInt(parsed.period, 10) > 0) periodInput.value = parsed.period;
+    if (parsed.algorithm) {
+      const a = String(parsed.algorithm).toUpperCase().replace(/^SHA(?=\d)/,"SHA-");
+      if (["SHA-1","SHA-256","SHA-512"].includes(a)) algorithmSelect.value = a;
+    }
+    if (parsed.type === "hotp") { typeSelect.value = "hotp"; counterInput.value = String(Math.max(0, Number(parsed.counter) || 0)); }
+    updateAdvancedModeUI();
+    playBtn.disabled = false;
+
+    // Auto-fill the account label from the QR code itself (e.g. "Google"
+    // + "sample005@gmail.com" -> "Google — sample005@gmail.com"), but
+    // never overwrite something the user already typed by hand.
+    if (!nameInput.value.trim()){
+      const issuer = (parsed.issuer || "").trim();
+      const account = (parsed.account || "").trim();
+      if (issuer && account) nameInput.value = issuer + " — " + account;
+      else if (account) nameInput.value = account;
+      else if (issuer) nameInput.value = issuer;
+    }
+
+    scanResult.textContent = "✓ Successfully captured";
+    scanResult.hidden = false;
+    scanStatus.hidden = true;
+
+    if (scanResultTimer) clearTimeout(scanResultTimer);
+    scanResultTimer = setTimeout(function(){
+      scanResult.hidden = true;
+    }, 3000);
+
+    playSuccessChime();
+    playBtn.click();
+  }
+
+  async function tryNativeBarcodeDetector(img){
+    if (!("BarcodeDetector" in window)) return null;
+    try{
+      if (typeof BarcodeDetector.getSupportedFormats === "function"){
+        const supported = await BarcodeDetector.getSupportedFormats();
+        if (supported && supported.indexOf("qr_code") === -1) return null;
+      }
+      const detector = new BarcodeDetector({ formats: ["qr_code"] });
+      const results = await detector.detect(img);
+      if (results && results.length > 0 && results[0].rawValue) return results[0].rawValue;
+    } catch(e){ /* fall through to jsQR */ }
+    return null;
+  }
+
+  function tryDecodeAtScale(img, targetLongSide){
+    const naturalLong = Math.max(img.naturalWidth, img.naturalHeight);
+    const scale = targetLongSide / naturalLong;
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    scanCanvas.width = w;
+    scanCanvas.height = h;
+    const ctx = scanCanvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, w, h);
+    try{
+      const imageData = ctx.getImageData(0, 0, w, h);
+      if (typeof jsQR === "function"){
+        return jsQR(imageData.data, w, h, { inversionAttempts: "attemptBoth" });
+      }
+    } catch(e){ /* fall through to null */ }
+    return null;
+  }
+
+  async function processQrPhoto(file){
+    scanStatus.hidden = true;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = async function(){
+      URL.revokeObjectURL(url);
+
+      // 1) Prefer the browser/OS's own native QR engine when available —
+      //    e.g. Google ML Kit on Android Chrome. Far more robust than any
+      //    pure-JS decoder, and also handles native size directly (no
+      //    manual canvas/scale juggling needed).
+      const nativeResult = await tryNativeBarcodeDetector(img);
+      if (nativeResult){
+        handleScanResult(nativeResult);
+        return;
+      }
+
+      // 2) Fall back to jsQR across a few sizes: native size (capped), then
+      //    upscaled passes, since small/cropped photos decode more
+      //    reliably once there are more pixels per QR module.
+      const naturalLong = Math.max(img.naturalWidth, img.naturalHeight);
+      const candidates = [
+        Math.min(naturalLong, 1400),
+        1400,
+        2000
+      ].filter(function(v, i, arr){ return arr.indexOf(v) === i; }); // dedupe
+
+      let result = null;
+      for (let i = 0; i < candidates.length && !result; i++){
+        result = tryDecodeAtScale(img, candidates[i]);
+      }
+
+      if (result && result.data){
+        handleScanResult(result.data);
+      } else {
+        scanStatus.hidden = false;
+        scanStatus.textContent = "That photo didn't contain a readable TOTP QR code — try again with it centered, in focus, and filling more of the frame.";
+      }
+    };
+    img.onerror = function(){
+      URL.revokeObjectURL(url);
+      scanStatus.hidden = false;
+      scanStatus.textContent = "Couldn't read that photo — try again.";
+    };
+    img.src = url;
+  }
+
+  /* ---------- Live QR viewfinder scanning ---------- */
+  let liveStream = null;
+  let liveScanning = false;
+  let liveRAF = null;
+  let liveFacing = "environment";
+  let liveDetector = null; // native BarcodeDetector instance, if available
+  let liveTrack = null;
+  let torchOn = false;
+
+  function stopLiveScan(){
+    liveScanning = false;
+    if (liveRAF) cancelAnimationFrame(liveRAF);
+    liveRAF = null;
+    if (liveStream){
+      liveStream.getTracks().forEach(function(t){ t.stop(); });
+      liveStream = null;
+    }
+    liveTrack = null;
+    torchOn = false;
+    if (torchBtn){ torchBtn.hidden = true; torchBtn.classList.remove("active"); }
+    scanInline.hidden = true;
+    scanBtn.classList.remove("active");
+  }
+
+  async function liveScanTick(){
+    if (!liveScanning) return;
+    if (scanVideo.readyState === scanVideo.HAVE_ENOUGH_DATA){
+      try{
+        if (liveDetector){
+          const results = await liveDetector.detect(scanVideo);
+          if (results && results.length > 0 && results[0].rawValue){
+            stopLiveScan();
+            handleScanResult(results[0].rawValue);
+            return;
+          }
+        } else if (typeof jsQR === "function"){
+          scanCanvas.width = scanVideo.videoWidth;
+          scanCanvas.height = scanVideo.videoHeight;
+          const ctx = scanCanvas.getContext("2d");
+          ctx.drawImage(scanVideo, 0, 0, scanCanvas.width, scanCanvas.height);
+          const imageData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+          const result = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
+          if (result && result.data){
+            stopLiveScan();
+            handleScanResult(result.data);
+            return;
+          }
+        }
+      } catch(e){ /* keep trying on next frame */ }
+    }
+    liveRAF = requestAnimationFrame(liveScanTick);
+  }
+
+  async function startLiveScan(facing){
+    stopLiveScan();
+    liveFacing = facing;
+    try{
+      liveStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: facing } },
+        audio: false
+      });
+      scanVideo.srcObject = liveStream;
+      await scanVideo.play();
+      liveTrack = liveStream.getVideoTracks()[0] || null;
+      if (torchBtn && liveTrack){
+        const caps = liveTrack.getCapabilities ? liveTrack.getCapabilities() : {};
+        torchBtn.hidden = !caps.torch;
+      }
+
+      if ("BarcodeDetector" in window){
+        try{ liveDetector = new BarcodeDetector({ formats: ["qr_code"] }); }
+        catch(e){ liveDetector = null; }
+      } else {
+        liveDetector = null;
+      }
+
+      scanInline.hidden = false;
+      scanStatus.hidden = true;
+      scanBtn.classList.add("active");
+      liveScanning = true;
+      liveRAF = requestAnimationFrame(liveScanTick);
+    } catch(err){
+      stopLiveScan();
+      // Every live-scan avenue failed (denied permission, no camera,
+      // insecure context, unsupported browser, etc.) — fall straight
+      // through to the device's native camera photo capture. No extra
+      // tap from the user; this is the last resort attempted automatically.
+      scanStatus.hidden = false;
+      scanStatus.textContent = "Live camera preview isn't available — opening your camera to take a photo instead.";
+      qrFileInput.click();
+    }
+  }
+
+  scanBtn.addEventListener("click", function(){
+    ensureAudioCtx(); // unlock audio now, inside a direct user gesture
+
+    if (liveScanning){
+      stopLiveScan(); // tap again to cancel an active live scan
+      scanStatus.hidden = true;
+      return;
+    }
+
+    // Caution shown before any camera is actually opened.
+    scanStatus.hidden = false;
+    scanStatus.textContent = "Opening your camera to scan a QR code. Only scan codes you trust — a QR code sets up an account using the secret key it contains.";
+
+    const canGoLive = window.isSecureContext
+      && navigator.mediaDevices
+      && typeof navigator.mediaDevices.getUserMedia === "function";
+
+    if (canGoLive){
+      startLiveScan("environment"); // true live viewfinder; QR is decoded frame-by-frame
+    } else {
+      // No live camera support here at all — go straight to the device's
+      // native camera photo-capture, automatically, as the final fallback.
+      qrFileInput.click();
+    }
+  });
+
+  torchBtn.addEventListener("click", async function(){
+    if (!liveTrack || !liveTrack.applyConstraints) return;
+    const caps = liveTrack.getCapabilities ? liveTrack.getCapabilities() : {};
+    if (!caps.torch) return;
+    torchOn = !torchOn;
+    try { await liveTrack.applyConstraints({ advanced: [{ torch: torchOn }] }); torchBtn.classList.toggle("active", torchOn); }
+    catch(e){ torchOn=false; torchBtn.classList.remove("active"); }
+  });
+
+  flipCamBtn.addEventListener("click", function(){
+    startLiveScan(liveFacing === "environment" ? "user" : "environment");
+  });
+
+  document.addEventListener("keydown", function(e){
+    if (e.key === "Escape" && liveScanning) stopLiveScan();
+  });
+
+  qrFileInput.addEventListener("change", function(e){
+    const file = e.target.files && e.target.files[0];
+    qrFileInput.value = ""; // reset so picking the same file again still fires 'change'
+    if (file) processQrPhoto(file);
+  });
+
+  importBtn.addEventListener("click", function(){
+    scanStatus.hidden = true;
+    ensureAudioCtx();
+    if (liveScanning) stopLiveScan();
+    qrImportInput.click(); // opens the gallery / file picker, no camera
+  });
+
+  qrImportInput.addEventListener("change", function(e){
+    const file = e.target.files && e.target.files[0];
+    qrImportInput.value = "";
+    if (file) processQrPhoto(file);
+  });
+
+  // events
+  secretInput.addEventListener("input", function(){
+    generatedTestSecret = false;
+    playBtn.disabled = secretInput.value.trim().length === 0;
+    secretInput.classList.remove("invalid");
+    if (scanResultTimer) clearTimeout(scanResultTimer);
+    scanResult.hidden = true;
+
+    // Typing/editing the key should never auto-generate or preview a
+    // code — stop any active live/custom generation and show a status
+    // message in the circle instead. The user must explicitly press
+    // Play (or hit Enter) to generate a code from whatever is currently
+    // in the field.
+    if (mode === "live" || mode === "custom") stopLive();
+    mode = "idle";
+    updateModeUI();
+    showIdleMessage(secretInput.value.trim().length === 0
+      ? "Waiting for key"
+      : "Press play to generate");
+  });
+  secretInput.addEventListener("keydown", function(e){
+    if (e.key === "Enter"){
+      e.preventDefault();
+      playBtn.click();
+    }
+  });
+  function updateAdvancedModeUI(){
+    const hotp = typeSelect.value === "hotp";
+    counterField.hidden = !hotp;
+    periodField.hidden = hotp;
+    counterNextBtn.hidden = !hotp;
+    algorithmNote.textContent = hotp
+      ? "HOTP: code is based on a counter. Increase the counter after each successful use when the service requires it."
+      : "TOTP: code changes automatically according to the selected period and current time.";
+  }
+
+  typeSelect.addEventListener("change", function(){ updateAdvancedModeUI(); render(); });
+  algorithmSelect.addEventListener("change", render);
+  counterInput.addEventListener("input", render);
+  counterNextBtn.addEventListener("click", function(){ counterInput.value = String(Math.max(0, Number(counterInput.value)||0) + 1); render(); });
+  digitsSelect.addEventListener("change", render);
+  periodInput.addEventListener("input", render);
+  updateAdvancedModeUI();
+
+  playBtn.addEventListener("click", function(){
+    if (!getSecretBytes()){
+      secretInput.classList.add("invalid");
+      secretInput.focus();
+      return;
+    }
+    if (datetimeInput.value && document.activeElement !== datetimeInput && mode === "custom"){
+      goCustom();
+    } else {
+      startLive();
+    }
+  });
+
+  datetimeInput.addEventListener("input", function(){
+    if (programmatic) return;
+    goCustom();
+  });
+
+  nowBtn.addEventListener("click", startLive);
+
+  genBtn.addEventListener("click", function(){
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let out = "";
+    if (window.crypto && window.crypto.getRandomValues){
+      const arr = new Uint8Array(32);
+      window.crypto.getRandomValues(arr);
+      for (let i=0;i<arr.length;i++) out += alphabet[arr[i] % 32];
+    } else {
+      for (let i=0;i<32;i++) out += alphabet[Math.floor(Math.random()*32)];
+    }
+    secretInput.value = out;
+    generatedTestSecret = true;
+    playBtn.disabled = false;
+    playBtn.click();
+  });
+
+  let clipboardClearTimer = null;
+  async function copyCodeValue(value, allowWhileGlobalHidden=false){
+    if (!value || appLocked) return;
+    if (document.body.classList.contains('hide-codes') && !allowWhileGlobalHidden) return;
+    const plain = String(value).replace(/\s+/g,'');
+    try{
+      await navigator.clipboard.writeText(plain);
+    } catch(e){
+      const ta = document.createElement("textarea");
+      ta.value = plain;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); } catch(e2) {}
+      document.body.removeChild(ta);
+    }
+    copyToast.hidden = false;
+    if (copyToastTimer) clearTimeout(copyToastTimer);
+    copyToastTimer = setTimeout(function(){ copyToast.hidden = true; }, 1500);
+    if (clipboardClearTimer) clearTimeout(clipboardClearTimer);
+    clipboardClearTimer = setTimeout(async function(){
+      try{
+        if (navigator.clipboard && navigator.clipboard.readText && navigator.clipboard.writeText){
+          const current = await navigator.clipboard.readText();
+          if (current === plain) await navigator.clipboard.writeText('');
+        }
+      }catch(e){}
+    }, 30000);
+  }
+  let copyToastTimer = null;
+  let pressTimer = null;
+  const LONG_PRESS_MS = 480;
+
+  // Long-press the big current code to copy it
+  function startPress(){
+    if (!currentRawCode) return;
+    codeDisplay.classList.add("pressing");
+    pressTimer = setTimeout(function(){
+      codeDisplay.classList.remove("pressing");
+      copyCodeValue(currentRawCode);
+      pressTimer = null;
+    }, LONG_PRESS_MS);
+  }
+  function cancelPress(){
+    codeDisplay.classList.remove("pressing");
+    if (pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+  }
+
+  codeDisplay.addEventListener("pointerdown", function(e){
+    e.preventDefault();
+    startPress();
+  });
+  codeDisplay.addEventListener("pointerup", cancelPress);
+  codeDisplay.addEventListener("pointerleave", cancelPress);
+  codeDisplay.addEventListener("pointercancel", cancelPress);
+  codeDisplay.addEventListener("contextmenu", function(e){ e.preventDefault(); }); // avoid the OS long-press menu on mobile
+
+  // Tap the "Next" code to copy that one instead — independent of the big code
+  nextCode.addEventListener("click", function(){
+    copyCodeValue(currentUpcomingCode);
+  });
+
+  // init
+  ringProgress.style.strokeDasharray = CIRC.toFixed(2);
+  ringProgress.style.strokeDashoffset = CIRC.toFixed(2);
+  programmatic = true;
+  datetimeInput.value = formatLocalDatetime(new Date());
+  programmatic = false;
+  updateModeUI();
+  render();
+
+  /* =====================================================
+     ACCOUNT LIST
+     Uses the exact same engine above (base32Decode,
+     totpFromCounter, formatCode) — no separate/fake logic.
+  ===================================================== */
+
+  const listStage = document.getElementById("listStage");
+  const generatorStage = document.getElementById("generatorStage");
+  const accountsContainer = document.getElementById("accountsContainer");
+  const accountSearch = document.getElementById("accountSearch");
+  const sortBtn = document.getElementById("sortBtn");
+  const emptyState = document.getElementById("emptyState");
+  const addAccountBtn = document.getElementById("addAccountBtn");
+  const backBtn = document.getElementById("backBtn");
+  const nameInput = document.getElementById("nameInput");
+  const saveBtn = document.getElementById("saveBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const secretChangedPanel = document.getElementById('secretChangedPanel');
+  const secretChangedName = document.getElementById('secretChangedName');
+  const secretChangedSaveNew = document.getElementById('secretChangedSaveNew');
+  const secretChangedOverwrite = document.getElementById('secretChangedOverwrite');
+  const secretChangedCancel = document.getElementById('secretChangedCancel');
+
+  let accounts = [];
+  const ACCOUNTS_STORAGE_KEY = "totp_authenticator_accounts_v1";
+  const VAULT_STORAGE_KEY = "totp_authenticator_encrypted_vault_v1";
+  const VAULT_VERSION = 2; // v2 adds a random master key wrapped by both the PIN and a recovery code; v1 vaults are read and transparently upgraded
+  const VAULT_ITERATIONS = 150000;
+
+  function bytesToB64(bytes){
+    let binary = "";
+    for (let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+  function b64ToBytes(text){
+    const binary = atob(text);
+    const out = new Uint8Array(binary.length);
+    for (let i=0;i<binary.length;i++) out[i] = binary.charCodeAt(i);
+    return out;
+  }
+  function hasEncryptedVault(){
+    return !!localStorage.getItem(VAULT_STORAGE_KEY);
+  }
+  async function deriveVaultKey(secretText, salt){
+    if (!window.crypto || !crypto.subtle) throw new Error("Encrypted storage requires Web Crypto support.");
+    const material = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(secretText), "PBKDF2", false, ["deriveKey"]
+    );
+    return crypto.subtle.deriveKey(
+      {name:"PBKDF2", salt:salt, iterations:VAULT_ITERATIONS, hash:"SHA-256"},
+      material,
+      {name:"AES-GCM", length:256},
+      false,
+      ["encrypt","decrypt"]
+    );
+  }
+
+  // Recovery codes use an unambiguous alphabet (no 0/O/1/I/L) so they're
+  // easy to transcribe by hand. Dashes/case are cosmetic — canonicalize
+  // before ever using the code as key material, so formatting differences
+  // at entry time never cause a false mismatch.
+  function randomRecoveryCode(){
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const bytes = crypto.getRandomValues(new Uint8Array(25));
+    let code = "";
+    for (let i=0;i<bytes.length;i++) code += alphabet[bytes[i] % alphabet.length];
+    return code.match(/.{1,5}/g).join("-");
+  }
+  function canonicalizeRecoveryCode(input){
+    return String(input || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  // A "wrap" is the 32-byte master key AES-GCM-encrypted under a key
+  // derived (via PBKDF2) from some secret — either the PIN or the
+  // recovery code. Two independent wraps of the same master key mean
+  // either secret alone can unlock the vault.
+  async function wrapMasterKey(masterKeyBytes, secretText){
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveVaultKey(secretText, salt);
+    const cipher = await crypto.subtle.encrypt({name:"AES-GCM", iv:iv}, key, masterKeyBytes);
+    return { salt:bytesToB64(salt), iv:bytesToB64(iv), data:bytesToB64(new Uint8Array(cipher)) };
+  }
+  async function unwrapMasterKey(wrap, secretText){
+    const salt = b64ToBytes(wrap.salt);
+    const iv = b64ToBytes(wrap.iv);
+    const data = b64ToBytes(wrap.data);
+    const key = await deriveVaultKey(secretText, salt);
+    const plain = await crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, key, data); // throws on wrong secret
+    return new Uint8Array(plain);
+  }
+  async function encryptDataWithMasterKey(masterKeyBytes, list){
+    const key = await crypto.subtle.importKey("raw", masterKeyBytes, {name:"AES-GCM"}, false, ["encrypt"]);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const payload = JSON.stringify({version:1, savedAt:Date.now(), accounts:list});
+    const cipher = await crypto.subtle.encrypt({name:"AES-GCM", iv:iv}, key, new TextEncoder().encode(payload));
+    return { iv:bytesToB64(iv), data:bytesToB64(new Uint8Array(cipher)) };
+  }
+  async function decryptDataWithMasterKey(masterKeyBytes, block){
+    const key = await crypto.subtle.importKey("raw", masterKeyBytes, {name:"AES-GCM"}, false, ["decrypt"]);
+    const iv = b64ToBytes(block.iv);
+    const data = b64ToBytes(block.data);
+    const plain = await crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, key, data);
+    const parsed = JSON.parse(new TextDecoder().decode(plain));
+    if (!parsed || !Array.isArray(parsed.accounts)) throw new Error("Invalid encrypted vault contents.");
+    return parsed.accounts;
+  }
+  async function persistVaultData(masterKeyBytes, list, pinWrap, recoveryWrap){
+    const dataBlock = await encryptDataWithMasterKey(masterKeyBytes, list);
+    localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify({
+      version: VAULT_VERSION,
+      iterations: VAULT_ITERATIONS,
+      data: dataBlock,
+      pinWrap: pinWrap,
+      recoveryWrap: recoveryWrap
+    }));
+    localStorage.removeItem(ACCOUNTS_STORAGE_KEY);
+  }
+
+  // First-time vault creation: brand-new master key, first PIN wrap, and
+  // a freshly generated recovery code. Returns the plaintext recovery
+  // code so the caller can show it to the user exactly once.
+  async function createVault(pin, list){
+    const masterKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const pinWrap = await wrapMasterKey(masterKeyBytes, "pin:" + pin);
+    const recoveryCode = randomRecoveryCode();
+    const recoveryWrap = await wrapMasterKey(masterKeyBytes, "recovery:" + canonicalizeRecoveryCode(recoveryCode));
+    await persistVaultData(masterKeyBytes, list, pinWrap, recoveryWrap);
+    window.__vaultMasterKey = masterKeyBytes;
+    window.__vaultPin = pin;
+    window.__vaultPinWrap = pinWrap;
+    window.__vaultRecoveryWrap = recoveryWrap;
+    return recoveryCode;
+  }
+  // Ordinary PIN change: re-wraps the *same* master key with the new PIN.
+  // The recovery code is untouched and still works.
+  async function rewrapPin(newPin, list){
+    const masterKeyBytes = window.__vaultMasterKey;
+    if (!masterKeyBytes) throw new Error("Vault is locked.");
+    const pinWrap = await wrapMasterKey(masterKeyBytes, "pin:" + newPin);
+    await persistVaultData(masterKeyBytes, list, pinWrap, window.__vaultRecoveryWrap);
+    window.__vaultPin = newPin;
+    window.__vaultPinWrap = pinWrap;
+  }
+  // Used right after a successful recovery-code unlock: sets a new PIN
+  // *and* rotates the recovery code, since the one just used should not
+  // remain valid for future use.
+  async function rewrapPinAndRotateRecovery(newPin, list){
+    const masterKeyBytes = window.__vaultMasterKey;
+    if (!masterKeyBytes) throw new Error("Vault is locked.");
+    const pinWrap = await wrapMasterKey(masterKeyBytes, "pin:" + newPin);
+    const recoveryCode = randomRecoveryCode();
+    const recoveryWrap = await wrapMasterKey(masterKeyBytes, "recovery:" + canonicalizeRecoveryCode(recoveryCode));
+    await persistVaultData(masterKeyBytes, list, pinWrap, recoveryWrap);
+    window.__vaultPin = newPin;
+    window.__vaultPinWrap = pinWrap;
+    window.__vaultRecoveryWrap = recoveryWrap;
+    return recoveryCode;
+  }
+  // Issues a brand-new recovery code without touching the PIN — used when
+  // the user just wants to regenerate one (e.g. they missed saving it the
+  // first time). The old recovery code stops working immediately.
+  async function regenerateRecoveryCode(list){
+    const masterKeyBytes = window.__vaultMasterKey;
+    if (!masterKeyBytes) throw new Error("Vault is locked.");
+    const recoveryCode = randomRecoveryCode();
+    const recoveryWrap = await wrapMasterKey(masterKeyBytes, "recovery:" + canonicalizeRecoveryCode(recoveryCode));
+    await persistVaultData(masterKeyBytes, list, window.__vaultPinWrap, recoveryWrap);
+    window.__vaultRecoveryWrap = recoveryWrap;
+    return recoveryCode;
+  }
+  // Routine save (add/edit/delete an account) — reuses the already-known
+  // master key and wraps in memory; only the encrypted data block changes.
+  async function saveVaultData(list){
+    if (!window.__vaultMasterKey) throw new Error("Vault is locked.");
+    await persistVaultData(window.__vaultMasterKey, list, window.__vaultPinWrap, window.__vaultRecoveryWrap);
+  }
+
+  async function decryptAccountsFromVault(pin){
+    const raw = localStorage.getItem(VAULT_STORAGE_KEY);
+    if (!raw) throw new Error("Encrypted vault not found.");
+    const record = JSON.parse(raw);
+    if (!record || !record.version) throw new Error("Unsupported vault format.");
+
+    if (record.version === 1){
+      // Pre-recovery-code format: PIN directly derives the data key.
+      // Decrypt with the old method, then transparently upgrade storage
+      // to v2 (this is what first introduces a recovery code for
+      // vaults created before this feature existed).
+      const salt = b64ToBytes(record.salt);
+      const iv = b64ToBytes(record.iv);
+      const data = b64ToBytes(record.data);
+      const key = await deriveVaultKey(pin, salt);
+      let plain;
+      try { plain = await crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, key, data); }
+      catch(e){ throw new Error("Incorrect current PIN."); }
+      const parsed = JSON.parse(new TextDecoder().decode(plain));
+      if (!parsed || !Array.isArray(parsed.accounts)) throw new Error("Invalid encrypted vault contents.");
+      const list = parsed.accounts;
+      const recoveryCode = await createVault(pin, list);
+      window.__pendingRecoveryCodeToShow = recoveryCode; // shown once, right after this unlock completes
+      return list;
+    }
+
+    if (record.version === 2){
+      let masterKeyBytes;
+      try { masterKeyBytes = await unwrapMasterKey(record.pinWrap, "pin:" + pin); }
+      catch(e){ throw new Error("Incorrect current PIN."); }
+      const list = await decryptDataWithMasterKey(masterKeyBytes, record.data);
+      window.__vaultMasterKey = masterKeyBytes;
+      window.__vaultPin = pin;
+      window.__vaultPinWrap = record.pinWrap;
+      window.__vaultRecoveryWrap = record.recoveryWrap;
+      return list;
+    }
+
+    throw new Error("Unsupported vault format.");
+  }
+
+  // Unlocks using the recovery code instead of the PIN. Only works on a
+  // v2 vault (one that has a recovery wrap at all).
+  // Cheap synchronous check for whether "Forgot PIN?" should be offered —
+  // true only for a v2 vault that actually has a recovery wrap stored.
+  function hasRecoveryCode(){
+    if (!hasEncryptedVault()) return false;
+    try {
+      const record = JSON.parse(localStorage.getItem(VAULT_STORAGE_KEY));
+      return !!(record && record.version === 2 && record.recoveryWrap);
+    } catch(e){ return false; }
+  }
+
+  async function unlockWithRecoveryCode(inputCode){
+    const raw = localStorage.getItem(VAULT_STORAGE_KEY);
+    if (!raw || !hasEncryptedVault()) throw new Error("No encrypted vault to recover.");
+    const record = JSON.parse(raw);
+    if (!record || record.version !== 2 || !record.recoveryWrap) {
+      throw new Error("A recovery code isn't available for this vault yet.");
+    }
+    let masterKeyBytes;
+    try {
+      masterKeyBytes = await unwrapMasterKey(record.recoveryWrap, "recovery:" + canonicalizeRecoveryCode(inputCode));
+    } catch(e){
+      throw new Error("Incorrect recovery code.");
+    }
+    const list = await decryptDataWithMasterKey(masterKeyBytes, record.data);
+    window.__vaultMasterKey = masterKeyBytes;
+    window.__vaultPinWrap = record.pinWrap;
+    window.__vaultRecoveryWrap = record.recoveryWrap;
+    return list;
+  }
+  function loadAccounts(){
+    try{
+      // With an encrypted vault, accounts remain unavailable until the user unlocks it.
+      if (hasEncryptedVault()) { accounts = []; return; }
+      const saved = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      accounts = Array.isArray(parsed) ? parsed : [];
+    }catch(e){ accounts = []; }
+  }
+  async function saveAccounts(){
+    try{
+      if (hasEncryptedVault() && window.__vaultMasterKey) {
+        await saveVaultData(accounts);
+      } else if (hasEncryptedVault()) {
+        throw new Error("Vault is locked.");
+      } else {
+        localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
+      }
+    }catch(e){ console.warn("Could not save accounts locally", e); }
+  }
+  async function persistCurrentAccounts(){
+    if (hasEncryptedVault() && window.__vaultMasterKey) await saveVaultData(accounts);
+    else if (!hasEncryptedVault()) localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
+  }
+
+  loadAccounts();
+  let editingId = null;
+  let editingOriginalSecret = null;
+  function normalizeSecretForCompare(s){
+    return String(s || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+  }
+  let listTimer = null;
+  // True only when the built-in "generate a test secret" action created the current secret.
+  let generatedTestSecret = false;
+
+  function generateAutoName(excludeId, prefix){
+    prefix = prefix || "Account";
+    let n = 1;
+    while (accounts.some(function(a){
+      return a.id !== excludeId && a.name === prefix + " " + n;
+    })){
+      n += 1;
+    }
+    return prefix + " " + n;
+  }
+
+  function dedupeName(name, excludeId){
+    if (!accounts.some(function(a){ return a.id !== excludeId && a.name === name; })){
+      return name;
+    }
+    let n = 2;
+    while (accounts.some(function(a){
+      return a.id !== excludeId && a.name === name + " (" + n + ")";
+    })){
+      n += 1;
+    }
+    return name + " (" + n + ")";
+  }
+
+  const RING_R = 16;
+  const RING_CIRC = 2 * Math.PI * RING_R;
+
+  function formatAddedAt(timestamp){
+    if (!timestamp) return "";
+    const d = new Date(timestamp);
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let hours = d.getHours();
+    const ampm = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    const minutes = pad2(d.getMinutes());
+    return "Added " + months[d.getMonth()] + " " + d.getDate() + ", " + d.getFullYear() +
+      " · " + hours + ":" + minutes + " " + ampm;
+  }
+
+  function showListScreen(){
+    stopLive();
+    generatorStage.hidden = true;
+    listStage.hidden = false;
+    renderAccountList();
+    if (listTimer) clearInterval(listTimer);
+    listTimer = setInterval(renderAccountList, 1000);
+  }
+
+  function showGeneratorScreen(){
+    if (listTimer){ clearInterval(listTimer); listTimer = null; }
+    listStage.hidden = true;
+    generatorStage.hidden = false;
+  }
+
+  function resetGeneratorForm(){
+    stopLive();
+    mode = "idle";
+    updateModeUI();
+    nameInput.value = "";
+    secretInput.value = "";
+    generatedTestSecret = false;
+    secretInput.classList.remove("invalid");
+    digitsSelect.value = "6";
+    periodInput.value = "30";
+    typeSelect.value = "totp";
+    algorithmSelect.value = "SHA-1";
+    counterInput.value = "0";
+    updateAdvancedModeUI();
+    playBtn.disabled = true;
+    currentUpcomingCode = "";
+    codeDisplay._cells = null;
+    showIdleMessage("Waiting for key");
+    scanResult.hidden = true;
+    scanStatus.hidden = true;
+  }
+
+  function openAddAccount(){
+    editingId = null;
+    editingOriginalSecret = null;
+    resetGeneratorForm();
+    deleteBtn.hidden = true;
+    saveBtn.textContent = "Save account";
+    showGeneratorScreen();
+    nameInput.focus();
+  }
+
+  function openEditAccount(id){
+    const account = accounts.find(function(a){ return a.id === id; });
+    if (!account) return;
+    editingId = id;
+    editingOriginalSecret = normalizeSecretForCompare(account.secret);
+    resetGeneratorForm();
+    generatedTestSecret = false;
+    nameInput.value = account.name;
+    secretInput.value = account.secret;
+    digitsSelect.value = String(account.digits || 6);
+    periodInput.value = String(account.period || 30);
+    typeSelect.value = (account.type || "totp").toLowerCase();
+    algorithmSelect.value = account.algorithm || "SHA-1";
+    counterInput.value = String(Math.max(0, Number(account.counter) || 0));
+    updateAdvancedModeUI();
+    playBtn.disabled = false;
+    deleteBtn.hidden = false;
+    saveBtn.textContent = "Save changes";
+    showGeneratorScreen();
+    // Show the current code as a static preview only — mode stays
+    // idle so the Play button remains meaningful (press it to
+    // watch the code tick live, same as adding a new account).
+    currentEpoch = Math.floor(Date.now() / 1000);
+    render();
+  }
+
+  async function currentAccountCode(account){
+    return generateOtp(account, Date.now());
+  }
+
+  let currentSearch = "";
+  let sortAZ = false;
+  let draggedId = null;
+
+  // Per-account OTP visibility is temporary and is never written to storage.
+  // { state: "visible" | "hidden", expiresAt: number }
+  const accountVisibility = new Map();
+  const ACCOUNT_REVEAL_MS = 10000;
+
+  function isAccountCodeVisible(id){
+    const globalHidden = document.body.classList.contains('hide-codes');
+    const entry = accountVisibility.get(id);
+    if (entry && entry.expiresAt && Date.now() >= entry.expiresAt){
+      accountVisibility.delete(id);
+      return !globalHidden;
+    }
+    if (entry) return entry.state === 'visible';
+    return !globalHidden;
+  }
+
+  function scheduleAccountHide(id){
+    const entry = accountVisibility.get(id);
+    if (!entry || entry.state !== 'visible') return;
+    const remaining = Math.max(0, (entry.expiresAt || Date.now()) - Date.now());
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(function(){
+      accountVisibility.delete(id);
+      renderAccountList();
+    }, remaining);
+  }
+
+  function eyeIcon(open){
+    return open
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.6"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.8 10.8 0 0 1 12 5c6 0 9.5 7 9.5 7a17.2 17.2 0 0 1-3 3.9"/><path d="M6.6 6.6C4.1 8.1 2.5 12 2.5 12s3.5 6 9.5 6c1.3 0 2.5-.3 3.6-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  }
+
+  function copyIcon(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+  }
+
+  function toggleAccountVisibility(id){
+    const visible = isAccountCodeVisible(id);
+    const old = accountVisibility.get(id);
+    if (old && old.timer) clearTimeout(old.timer);
+    if (visible){
+      accountVisibility.set(id, {state:'hidden', expiresAt:0});
+    } else {
+      const entry = {state:'visible', expiresAt:Date.now()+ACCOUNT_REVEAL_MS, timer:null};
+      accountVisibility.set(id, entry);
+      scheduleAccountHide(id);
+    }
+    renderAccountList();
+  }
+
+  function toggleFavorite(id, heartEl){
+    const account = accounts.find(function(a){ return a.id === id; });
+    if (!account) return;
+    account.favorite = !account.favorite;
+    saveAccounts();
+    if (heartEl){
+      // Quick "reaction" pop, like tapping a Facebook reaction, before the
+      // list re-renders (which moves the card if it just became a favorite).
+      heartEl.classList.add("fav-pop");
+      setTimeout(function(){ renderAccountList(); }, 220);
+    } else {
+      renderAccountList();
+    }
+  }
+
+  let pendingUndo = null; // { account, index, timer }
+  const undoToast = document.getElementById("undoToast");
+  const undoToastText = document.getElementById("undoToastText");
+  const undoToastBtn = document.getElementById("undoToastBtn");
+
+  function hideUndoToast(){
+    if (undoToast) undoToast.hidden = true;
+  }
+  function showUndoToast(name){
+    if (!undoToast) return;
+    undoToastText.textContent = '"' + name + '" deleted.';
+    undoToast.hidden = false;
+  }
+  function deleteAccountWithUndo(id){
+    const idx = accounts.findIndex(function(a){ return a.id === id; });
+    if (idx === -1) return;
+    const account = accounts[idx];
+    accounts.splice(idx, 1);
+    saveAccounts();
+    renderAccountList();
+
+    if (pendingUndo && pendingUndo.timer) clearTimeout(pendingUndo.timer);
+    pendingUndo = { account: account, index: idx };
+    showUndoToast(account.name);
+    pendingUndo.timer = setTimeout(function(){ pendingUndo = null; hideUndoToast(); }, 6000);
+  }
+  function undoDelete(){
+    if (!pendingUndo) return;
+    clearTimeout(pendingUndo.timer);
+    const insertAt = Math.min(pendingUndo.index, accounts.length);
+    accounts.splice(insertAt, 0, pendingUndo.account);
+    saveAccounts();
+    renderAccountList();
+    pendingUndo = null;
+    hideUndoToast();
+  }
+  if (undoToastBtn) undoToastBtn.addEventListener("click", undoDelete);
+
+  // Swipe left or right on a card to delete it (with the same undo safety
+  // net as the explicit delete button). A vertical touch is left alone so
+  // normal list scrolling is never interrupted.
+  function attachSwipeToDelete(card, wrap, accountId){
+    const threshold = 88;
+    const maxDrag = 132;
+    let startX = 0, startY = 0, currentX = 0;
+    let tracking = false, decided = false, horizontal = false;
+    const bg = wrap.querySelector(".swipe-delete-bg");
+
+    function reset(){
+      card.style.transition = "transform .2s ease, opacity .2s ease";
+      card.style.transform = "translateX(0)";
+      card.style.opacity = "1";
+      if (bg) bg.style.opacity = "0";
+    }
+
+    card.addEventListener("touchstart", function(e){
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      currentX = 0;
+      tracking = true;
+      decided = false;
+      horizontal = false;
+      card.style.transition = "none";
+    }, {passive:true});
+
+    card.addEventListener("touchmove", function(e){
+      if (!tracking) return;
+      const dx = e.touches[0].clientX - startX;
+      const dy = e.touches[0].clientY - startY;
+      if (!decided){
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        decided = true;
+        horizontal = Math.abs(dx) > Math.abs(dy) * 1.3;
+        if (!horizontal){ tracking = false; return; } // let the page scroll normally
+      }
+      if (!horizontal) return;
+      e.preventDefault();
+      currentX = Math.max(-maxDrag, Math.min(maxDrag, dx));
+      card.style.transform = "translateX(" + currentX + "px)";
+      const strength = Math.min(1, Math.abs(currentX) / threshold);
+      card.style.opacity = String(1 - strength * 0.45);
+      if (bg) bg.style.opacity = String(strength);
+    }, {passive:false});
+
+    function finish(){
+      if (!tracking) return;
+      tracking = false;
+      if (horizontal && Math.abs(currentX) >= threshold){
+        const dir = currentX > 0 ? 1 : -1;
+        card.style.transition = "transform .18s ease, opacity .18s ease";
+        card.style.transform = "translateX(" + (dir * 480) + "px)";
+        card.style.opacity = "0";
+        setTimeout(function(){ deleteAccountWithUndo(accountId); }, 170);
+      } else {
+        reset();
+      }
+    }
+    card.addEventListener("touchend", finish);
+    card.addEventListener("touchcancel", finish);
+  }
+
+  let renderGeneration = 0;
+  async function renderAccountList(){
+    const myGeneration = ++renderGeneration;
+    accountsContainer.innerHTML = "";
+    let visible = accounts.filter(function(a){
+      const q = currentSearch.trim().toLowerCase();
+      return !q || (a.name || "").toLowerCase().includes(q) || (a.secret || "").toLowerCase().includes(q);
+    });
+    if (sortAZ) visible = visible.slice().sort(function(a,b){ return (a.name||"").localeCompare(b.name||""); });
+    // Favorites always float to the top; stable sort preserves whatever
+    // order (A–Z or manual) was already established within each group.
+    visible = visible.slice().sort(function(a,b){ return (b.favorite?1:0) - (a.favorite?1:0); });
+
+    if (visible.length === 0){
+      emptyState.hidden = false;
+      emptyState.querySelector("h2").textContent = accounts.length ? "No matching accounts" : "No accounts yet";
+      emptyState.querySelector("p").textContent = accounts.length ? "Try another search." : "Add an account to start generating codes.";
+      return;
+    }
+    emptyState.hidden = true;
+
+    for (const account of visible){
+      // A newer render started while we were awaiting — abandon this
+      // stale pass so its cards never get appended alongside the new one.
+      if (myGeneration !== renderGeneration) return;
+      const result = await currentAccountCode(account);
+      if (myGeneration !== renderGeneration) return;
+      if (!accounts.some(a=>a.id===account.id)) continue;
+      const card = document.createElement("div");
+      card.className = "account-card";
+      card.draggable = !currentSearch && !sortAZ;
+      const wrap = document.createElement("div");
+      wrap.className = "account-card-wrap";
+      wrap.innerHTML = '<div class="swipe-delete-bg">🗑 Delete</div>';
+      const isFavorite = !!account.favorite;
+      const codeText = result ? formatCode(result.code) : "invalid secret";
+      const codeVisible = isAccountCodeVisible(account.id);
+      const displayCode = codeVisible ? codeText : (result ? (String(result.code).length === 8 ? "•••• ••••" : "••• •••") : "••• •••");
+      const remaining = result && result.remaining != null ? result.remaining : "—";
+      const period = result && result.period ? result.period : 30;
+      const offset = result && result.period ? RING_CIRC * (1 - remaining / period) : RING_CIRC;
+      const kind = (account.type || "totp").toUpperCase();
+      const meta = kind + " · " + (account.algorithm || "SHA-1");
+      card.innerHTML =
+        '<div class="account-card-info">' +
+          '<div class="account-card-name-row"><span class="fav-heart '+(isFavorite?'is-fav':'')+'" title="'+(isFavorite?'Remove from favorites':'Add to favorites')+'" aria-label="'+(isFavorite?'Remove from favorites':'Add to favorites')+'">'+(isFavorite?'❤️':'🤍')+'</span><div class="account-card-name-stack"><span class="account-card-name"></span><span class="account-card-date"></span></div></div>' +
+          '<div class="account-card-meta" style="font-size:.62rem;color:var(--text-dim);margin:.18rem 0 .35rem;font-family:\"IBM Plex Mono\",monospace">'+meta+'</div>' +
+          '<div class="account-card-code '+(codeVisible ? '' : 'is-hidden')+'"></div>' +
+        '</div>' +
+        '<div class="account-card-ring"><svg viewBox="0 0 38 38"><circle class="ring-track" cx="19" cy="19" r="'+RING_R+'"></circle><circle class="ring-progress" cx="19" cy="19" r="'+RING_R+'" stroke-dasharray="'+RING_CIRC.toFixed(2)+'" stroke-dashoffset="'+offset.toFixed(2)+'"></circle></svg><span>'+(result ? remaining : "—")+'</span></div>' +
+        '<div class="card-actions">' +
+          '<button type="button" class="eye-action '+(codeVisible ? 'revealed' : '')+'" title="'+(codeVisible ? 'Hide this code' : 'Show this code for 10 seconds')+'" aria-label="'+(codeVisible ? 'Hide this code' : 'Show this code for 10 seconds')+'">'+eyeIcon(codeVisible)+'</button>' +
+          '<button type="button" class="copy-action" title="'+(codeVisible ? 'Copy code' : 'Reveal the code before copying')+'" aria-label="'+(codeVisible ? 'Copy code' : 'Reveal the code before copying')+'" '+(codeVisible ? '' : 'disabled')+'>'+copyIcon()+'</button>' +
+          '<button type="button" class="card-action edit-action" title="Edit account">✎</button>' +
+          '<button type="button" class="card-action danger delete-action" title="Delete account">×</button>' +
+        '</div>';
+      card.querySelector(".account-card-name").textContent = account.name;
+      card.querySelector(".account-card-date").textContent = formatAddedAt(account.createdAt);
+      card.querySelector(".account-card-code").textContent = displayCode;
+
+      card.addEventListener("click", function(e){ if (e.target.closest(".card-actions") || e.target.closest(".fav-heart")) return; openEditAccount(account.id); });
+      card.querySelector(".fav-heart").addEventListener("click", function(e){
+        e.stopPropagation();
+        toggleFavorite(account.id, e.currentTarget);
+      });
+      card.querySelector(".eye-action").addEventListener("click", function(e){ e.stopPropagation(); toggleAccountVisibility(account.id); });
+      card.querySelector(".copy-action").addEventListener("click", async function(e){
+        e.stopPropagation();
+        if (!codeVisible || !result) { showToastSecurity('Reveal the code first.'); return; }
+        await copyCodeValue(result.code, true);
+      });
+      card.querySelector(".edit-action").addEventListener("click", function(e){ e.stopPropagation(); openEditAccount(account.id); });
+      card.querySelector(".delete-action").addEventListener("click", function(e){ e.stopPropagation(); askDelete(account.id); });
+
+      if (card.draggable){
+        card.addEventListener("dragstart", function(){ draggedId = account.id; card.classList.add("dragging"); });
+        card.addEventListener("dragend", function(){ draggedId = null; card.classList.remove("dragging"); });
+        card.addEventListener("dragover", function(e){ e.preventDefault(); card.classList.add("drop-target"); });
+        card.addEventListener("dragleave", function(){ card.classList.remove("drop-target"); });
+        card.addEventListener("drop", function(e){
+          e.preventDefault(); card.classList.remove("drop-target");
+          if (!draggedId || draggedId === account.id) return;
+          const from = accounts.findIndex(a=>a.id===draggedId), to = accounts.findIndex(a=>a.id===account.id);
+          if (from<0 || to<0) return;
+          const moved = accounts.splice(from,1)[0]; accounts.splice(to,0,moved); saveAccounts(); renderAccountList();
+        });
+      }
+      wrap.appendChild(card);
+      attachSwipeToDelete(card, wrap, account.id);
+      accountsContainer.appendChild(wrap);
+    }
+  }
+
+  addAccountBtn.addEventListener("click", openAddAccount);
+
+  backBtn.addEventListener("click", function(){
+    showListScreen();
+  });
+
+  function buildAccountRecord(forcedNewId){
+    const excludeId = forcedNewId ? null : editingId;
+    let name = nameInput.value.trim();
+    if (!name){
+      name = generatedTestSecret
+        ? generateAutoName(excludeId, "Test")
+        : generateAutoName(excludeId, "Account");
+    } else {
+      name = dedupeName(name, excludeId);
+    }
+
+    const existing = (!forcedNewId && editingId)
+      ? accounts.find(function(a){ return a.id === editingId; })
+      : null;
+
+    return {
+      id: forcedNewId || editingId || Date.now(),
+      name: name,
+      secret: secretInput.value.trim(),
+      digits: parseInt(digitsSelect.value, 10) || 6,
+      period: parseInt(periodInput.value, 10) || 30,
+      type: typeSelect.value === "hotp" ? "hotp" : "totp",
+      algorithm: algorithmSelect.value || "SHA-1",
+      counter: Math.max(0, Number(counterInput.value) || 0),
+      favorite: existing ? !!existing.favorite : false,
+      createdAt: existing ? existing.createdAt : Date.now()
+    };
+  }
+
+  function persistRecord(record, isNew){
+    if (!isNew && editingId){
+      const idx = accounts.findIndex(function(a){ return a.id === editingId; });
+      if (idx !== -1) accounts[idx] = record;
+    } else {
+      accounts.push(record);
+    }
+    saveAccounts();
+    showListScreen();
+  }
+
+  function closeSecretChangedPanel(){
+    secretChangedPanel.classList.remove("open");
+    secretChangedPanel.setAttribute("aria-hidden","true");
+  }
+
+  saveBtn.addEventListener("click", function(){
+    const secretBytes = getSecretBytes();
+
+    if (!secretBytes){
+      secretInput.classList.add("invalid");
+      secretInput.focus();
+      return;
+    }
+
+    // Editing an existing account whose secret key no longer matches what
+    // was originally saved needs explicit confirmation — silently
+    // overwriting a live, working secret is exactly the kind of mistake
+    // that locks someone out of a real account.
+    if (editingId && editingOriginalSecret !== null){
+      const currentSecret = normalizeSecretForCompare(secretInput.value);
+      if (currentSecret !== editingOriginalSecret){
+        const account = accounts.find(function(a){ return a.id === editingId; });
+        secretChangedName.textContent = (account && account.name) || "this account";
+        secretChangedPanel.classList.add("open");
+        secretChangedPanel.setAttribute("aria-hidden","false");
+        return;
+      }
+    }
+
+    persistRecord(buildAccountRecord(null), !editingId);
+  });
+
+  secretChangedOverwrite.addEventListener("click", function(){
+    closeSecretChangedPanel();
+    persistRecord(buildAccountRecord(null), false); // overwrite the existing account in place
+  });
+
+  secretChangedSaveNew.addEventListener("click", function(){
+    closeSecretChangedPanel();
+    persistRecord(buildAccountRecord(Date.now()), true); // append as a separate new account; original untouched
+  });
+
+  secretChangedCancel.addEventListener("click", closeSecretChangedPanel);
+  secretChangedPanel.addEventListener("click", function(e){ if (e.target === secretChangedPanel) closeSecretChangedPanel(); });
+
+  const deleteConfirm = document.getElementById("deleteConfirm");
+  const deleteConfirmText = document.getElementById("deleteConfirmText");
+  const deleteCancel = document.getElementById("deleteCancel");
+  const deleteConfirmBtn = document.getElementById("deleteConfirmBtn");
+  let pendingDeleteId = null;
+
+  function askDelete(id){
+    const account = accounts.find(a=>a.id===id);
+    if (!account) return;
+    pendingDeleteId = id;
+    deleteConfirmText.textContent = 'Delete “' + account.name + '”? The stored secret will be removed from this browser.';
+    deleteConfirm.classList.add("open"); deleteConfirm.setAttribute("aria-hidden","false");
+  }
+  function closeDelete(){ pendingDeleteId=null; deleteConfirm.classList.remove("open"); deleteConfirm.setAttribute("aria-hidden","true"); }
+  deleteCancel.addEventListener("click", closeDelete);
+  deleteConfirm.addEventListener("click", e=>{ if(e.target===deleteConfirm) closeDelete(); });
+  deleteConfirmBtn.addEventListener("click", function(){
+    if (pendingDeleteId !== null){ deleteAccountWithUndo(pendingDeleteId); }
+    closeDelete();
+  });
+
+  deleteBtn.addEventListener("click", function(){ if (editingId) askDelete(editingId); });
+
+  accountSearch.addEventListener("input", function(){ currentSearch=this.value; renderAccountList(); });
+  sortBtn.addEventListener("click", function(){ sortAZ=!sortAZ; this.textContent=sortAZ ? "A–Z" : "Manual"; renderAccountList(); });
+
+
+
+  // Start on the account list.
+  showListScreen();
+
+
+  /* ---------- Hamburger menu ---------- */
+  const menuBtn = document.getElementById('menuBtn');
+  const navDrawer = document.getElementById('navDrawer');
+  const drawerOverlay = document.getElementById('drawerOverlay');
+  const drawerClose = document.getElementById('drawerClose');
+  const drawerAccounts = document.getElementById('drawerAccounts');
+  const drawerAddAccount = document.getElementById('drawerAddAccount');
+  const drawerSettings = document.getElementById('drawerSettings');
+  const drawerAbout = document.getElementById('drawerAbout');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const settingsClose = document.getElementById('settingsClose');
+  const settingsBack = document.getElementById('settingsBack');
+  const aboutPanel = document.getElementById('aboutPanel');
+  const aboutClose = document.getElementById('aboutClose');
+  const themeToggle = document.getElementById('themeToggle');
+  const drawerBackup = document.getElementById('drawerBackup');
+  const settingsBackup = document.getElementById('settingsBackup');
+  const backupPanel = document.getElementById('backupPanel');
+  const backupClose = document.getElementById('backupClose');
+  const exportBackup = document.getElementById('exportBackup');
+  const importBackup = document.getElementById('importBackup');
+  const backupFileInput = document.getElementById('backupFileInput');
+  const backupStatus = document.getElementById('backupStatus');
+
+  /* ---------- Phase 4: Security state ---------- */
+  const lockScreen = document.getElementById('lockScreen');
+  const lockTitle = document.getElementById('lockTitle');
+  const lockDescription = document.getElementById('lockDescription');
+  const unlockForm = document.getElementById('unlockForm');
+  const unlockPin = document.getElementById('unlockPin');
+  const lockError = document.getElementById('lockError');
+  const lockCancelSetup = document.getElementById('lockCancelSetup');
+  const lockSubmitBtn = document.getElementById('lockSubmitBtn');
+  const lockResetApp = document.getElementById('lockResetApp');
+  const lockUseRecovery = document.getElementById('lockUseRecovery');
+  const recoveryEntryScreen = document.getElementById('recoveryEntryScreen');
+  const recoveryEntryForm = document.getElementById('recoveryEntryForm');
+  const recoveryCodeInput = document.getElementById('recoveryCodeInput');
+  const recoveryEntryError = document.getElementById('recoveryEntryError');
+  const recoveryEntryCancel = document.getElementById('recoveryEntryCancel');
+  const recoveryCodeScreen = document.getElementById('recoveryCodeScreen');
+  const recoveryCodeValue = document.getElementById('recoveryCodeValue');
+  const recoveryCodeCopy = document.getElementById('recoveryCodeCopy');
+  const recoveryCodeConfirm = document.getElementById('recoveryCodeConfirm');
+  const recoveryCodeContinue = document.getElementById('recoveryCodeContinue');
+  const drawerLock = document.getElementById('drawerLock');
+  const hideCodesToggle = document.getElementById('hideCodesToggle');
+  const pinSetupBtn = document.getElementById('pinSetupBtn');
+  const pinDisableBtn = document.getElementById('pinDisableBtn');
+  const viewRecoveryBtn = document.getElementById('viewRecoveryBtn');
+  const autoLockSelect = document.getElementById('autoLockSelect');
+  const backgroundLockToggle = document.getElementById('backgroundLockToggle');
+  const biometricBtn = document.getElementById('biometricBtn');
+  const biometricStatus = document.getElementById('biometricStatus');
+  const PIN_HASH_KEY = 'totp_authenticator_pin_hash_v1';
+  const HIDE_CODES_KEY = 'totp_authenticator_hide_codes_v1';
+  const AUTO_LOCK_KEY = 'totp_authenticator_auto_lock_v1';
+  const BACKGROUND_LOCK_KEY = 'totp_authenticator_background_lock_v1';
+  const BIOMETRIC_CRED_KEY = 'totp_authenticator_webauthn_credential_v1';
+  const PIN_ATTEMPTS_KEY = 'totp_authenticator_pin_attempts_v1';
+  const PIN_ATTEMPT_THRESHOLD = 5; // wrong PINs allowed before a lockout kicks in
+  // Escalating lockout duration each time the threshold is hit again
+  // (30s, 1m, 5m, 15m, 30m — then stays at 30m for further failures).
+  const PIN_LOCKOUT_STAGES_MS = [30000, 60000, 300000, 900000, 1800000];
+  const VAULT_STATUS = document.getElementById('vaultStatus');
+  let vaultUnlocked = !hasEncryptedVault();
+  window.__vaultPin = '';
+  let appLocked = false;
+  let pinMode = 'unlock';
+  let pinSetupStep = 0;
+  let firstSetupPin = '';
+  let autoLockTimer = null;
+  let lastActivity = Date.now();
+
+  async function sha256Hex(text){
+    if (!window.crypto || !window.crypto.subtle) throw new Error('Secure hashing is unavailable in this browser.');
+    const data = new TextEncoder().encode(text);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hash)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+  }
+  function hasPin(){ return !!localStorage.getItem(PIN_HASH_KEY); }
+
+  /* ---------- PIN attempt rate-limiting ----------
+     Tracked in localStorage (not memory) so a page reload can't be used
+     to reset the counter. Applies to any flow that verifies an existing
+     PIN against the stored hash: unlocking, and confirming the current
+     PIN before changing or disabling it. */
+  function readPinAttempts(){
+    try {
+      const raw = localStorage.getItem(PIN_ATTEMPTS_KEY);
+      if (!raw) return { count: 0, stage: 0, lockedUntil: 0 };
+      const parsed = JSON.parse(raw);
+      return {
+        count: Number(parsed.count) || 0,
+        stage: Number(parsed.stage) || 0,
+        lockedUntil: Number(parsed.lockedUntil) || 0
+      };
+    } catch(e){ return { count: 0, stage: 0, lockedUntil: 0 }; }
+  }
+  function writePinAttempts(state){
+    localStorage.setItem(PIN_ATTEMPTS_KEY, JSON.stringify(state));
+  }
+  function clearPinAttempts(){
+    localStorage.removeItem(PIN_ATTEMPTS_KEY);
+  }
+  function registerFailedPinAttempt(){
+    const state = readPinAttempts();
+    state.count += 1;
+    if (state.count >= PIN_ATTEMPT_THRESHOLD){
+      const duration = PIN_LOCKOUT_STAGES_MS[Math.min(state.stage, PIN_LOCKOUT_STAGES_MS.length - 1)];
+      state.lockedUntil = Date.now() + duration;
+      state.stage += 1;
+      state.count = 0;
+    }
+    writePinAttempts(state);
+    return state;
+  }
+  function pinLockoutRemainingMs(){
+    const remaining = readPinAttempts().lockedUntil - Date.now();
+    return remaining > 0 ? remaining : 0;
+  }
+  function formatLockoutDuration(ms){
+    const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
+    if (totalSeconds < 60) return totalSeconds + (totalSeconds === 1 ? ' second' : ' seconds');
+    const mins = Math.ceil(totalSeconds / 60);
+    return mins + (mins === 1 ? ' minute' : ' minutes');
+  }
+
+  let pinLockoutTimer = null;
+  function applyPinLockoutUI(){
+    const remaining = pinLockoutRemainingMs();
+    if (pinLockoutTimer) { clearInterval(pinLockoutTimer); pinLockoutTimer = null; }
+
+    if (remaining <= 0){
+      unlockPin.disabled = false;
+      lockSubmitBtn.disabled = false;
+      return false;
+    }
+
+    unlockPin.disabled = true;
+    lockSubmitBtn.disabled = true;
+    unlockPin.value = '';
+
+    const tick = function(){
+      const left = pinLockoutRemainingMs();
+      if (left <= 0){
+        clearInterval(pinLockoutTimer);
+        pinLockoutTimer = null;
+        unlockPin.disabled = false;
+        lockSubmitBtn.disabled = false;
+        lockError.textContent = '';
+        unlockPin.focus();
+        return;
+      }
+      lockError.textContent = 'Too many incorrect attempts. Try again in ' + formatLockoutDuration(left) + '.';
+    };
+    tick();
+    pinLockoutTimer = setInterval(tick, 1000);
+    return true;
+  }
+
+  function setPinButtonState(){
+    const enabled = hasPin();
+    pinSetupBtn.textContent = enabled ? 'Change' : 'Set PIN';
+    pinDisableBtn.hidden = !enabled;
+    if (viewRecoveryBtn) viewRecoveryBtn.hidden = !(enabled && hasRecoveryCode());
+    if (VAULT_STATUS){
+      VAULT_STATUS.textContent = hasEncryptedVault() ? 'AES-GCM' : (enabled ? 'ENCRYPTING…' : 'PIN REQUIRED');
+      VAULT_STATUS.style.color = hasEncryptedVault() ? 'var(--teal)' : 'var(--amber)';
+    }
+  }
+
+  function updateLockActionLabel(){
+    if (!lockSubmitBtn) return;
+    if (pinMode === 'unlock') {
+      lockSubmitBtn.textContent = 'UNLOCK';
+    } else if (pinMode === 'setup') {
+      lockSubmitBtn.textContent = pinSetupStep === 1 ? 'CONTINUE' : 'SET PIN';
+    } else if (pinMode === 'verify-change') {
+      lockSubmitBtn.textContent = 'CONTINUE';
+    } else if (pinMode === 'verify-disable') {
+      lockSubmitBtn.textContent = 'VERIFY PIN';
+    } else {
+      lockSubmitBtn.textContent = 'CONTINUE';
+    }
+  }
+
+  function showLock(mode){
+    appLocked = true;
+    if ((mode || 'unlock') === 'unlock') {
+      window.__vaultPin = '';
+      accounts = [];
+      if (typeof renderAccountList === 'function') renderAccountList();
+    }
+    pinMode = mode || 'unlock';
+    pinSetupStep = pinMode === 'setup' ? 1 : 0;
+    firstSetupPin = '';
+
+    if (pinMode === 'setup') {
+      lockTitle.textContent = 'Set app PIN';
+      lockDescription.textContent = 'Choose a 4–8 digit PIN. You will confirm it before setup is complete.';
+      lockCancelSetup.hidden = false;
+      lockCancelSetup.textContent = 'Cancel PIN setup';
+    } else if (pinMode === 'verify-change' || pinMode === 'verify-disable' || pinMode === 'view-recovery') {
+      lockTitle.textContent = 'Verify current PIN';
+      lockDescription.textContent = pinMode === 'verify-disable'
+        ? 'Enter your current PIN to disable app lock.'
+        : pinMode === 'view-recovery'
+        ? 'Enter your current PIN to generate a new recovery code. Your old recovery code will stop working.'
+        : 'Enter your current PIN before changing it.';
+      lockCancelSetup.hidden = false;
+      lockCancelSetup.textContent = 'Cancel';
+    } else {
+      lockTitle.textContent = 'Authenticator locked';
+      lockDescription.textContent = 'Enter your PIN to unlock your accounts and codes.';
+      lockCancelSetup.hidden = true;
+    }
+
+    if (lockResetApp) lockResetApp.hidden = (pinMode !== 'unlock');
+    if (lockUseRecovery) lockUseRecovery.hidden = !(pinMode === 'unlock' && hasRecoveryCode());
+    updateLockActionLabel();
+    unlockPin.value = '';
+    lockError.textContent = '';
+    lockScreen.classList.add('open');
+    lockScreen.setAttribute('aria-hidden','false');
+
+    const isGatedMode = pinMode === 'unlock' || pinMode === 'verify-change' || pinMode === 'verify-disable' || pinMode === 'view-recovery';
+    const locked = isGatedMode && applyPinLockoutUI();
+    if (!locked) setTimeout(function(){ unlockPin.focus(); }, 80);
+    stopLive();
+  }
+
+  function hideLock(){
+    appLocked = false;
+    pinMode = 'unlock';
+    pinSetupStep = 0;
+    firstSetupPin = '';
+    if (pinLockoutTimer) { clearInterval(pinLockoutTimer); pinLockoutTimer = null; }
+    unlockPin.disabled = false;
+    lockSubmitBtn.disabled = false;
+    lockScreen.classList.remove('open');
+    lockScreen.setAttribute('aria-hidden','true');
+    unlockPin.value = '';
+    lockError.textContent = '';
+    updateLockActionLabel();
+    resetAutoLock();
+  }
+
+  function hardResetAppData(){
+    const ok = window.confirm('This will permanently delete all authenticator accounts, the encrypted vault, PIN, biometric credential, and security preferences stored in this browser. This cannot be undone. Continue?');
+    if (!ok) return;
+    const keys = [
+      ACCOUNTS_STORAGE_KEY, VAULT_STORAGE_KEY, PIN_HASH_KEY, HIDE_CODES_KEY,
+      AUTO_LOCK_KEY, BACKGROUND_LOCK_KEY, BIOMETRIC_CRED_KEY, PIN_ATTEMPTS_KEY
+    ];
+    keys.forEach(function(k){ localStorage.removeItem(k); });
+    if (pinLockoutTimer) { clearInterval(pinLockoutTimer); pinLockoutTimer = null; }
+    unlockPin.disabled = false;
+    lockSubmitBtn.disabled = false;
+    accounts = [];
+    window.__vaultPin = '';
+    window.__vaultMasterKey = null;
+    window.__vaultPinWrap = null;
+    window.__vaultRecoveryWrap = null;
+    window.__pendingRecoveryRotation = false;
+    window.__pendingRecoveryCodeToShow = null;
+    window.__verifiedOldPin = '';
+    appLocked = false;
+    vaultUnlocked = true;
+    lockScreen.classList.remove('open');
+    lockScreen.setAttribute('aria-hidden','true');
+    setPinButtonState();
+    showListScreen();
+    showToastSecurity('App data reset. You can start again.');
+  }
+
+  async function unlockOrSetup(pin){
+    if (!/^\d{4,8}$/.test(pin)) throw new Error('PIN must contain 4–8 digits.');
+
+    const stored = localStorage.getItem(PIN_HASH_KEY);
+
+    // First-time PIN setup, an ordinary PIN change, or the final step of a
+    // recovery-code-driven PIN reset all land here (enter -> confirm -> save).
+    if (pinMode === 'setup') {
+      if (pinSetupStep === 1) {
+        firstSetupPin = pin;
+        pinSetupStep = 2;
+        unlockPin.value = '';
+        lockTitle.textContent = 'Confirm your PIN';
+        lockDescription.textContent = 'Enter the same PIN again to finish setup.';
+        updateLockActionLabel();
+        lockError.textContent = '';
+        unlockPin.focus();
+        return;
+      }
+      if (pin !== firstSetupPin) throw new Error('PINs do not match.');
+
+      const changingExistingPin = !!window.__verifiedOldPin;
+      const viaRecovery = !!window.__pendingRecoveryRotation;
+      let newRecoveryCode = null;
+
+      if (viaRecovery) {
+        // Reset via recovery code: re-wrap with the new PIN AND rotate the
+        // recovery code — the one just used should not remain valid.
+        newRecoveryCode = await rewrapPinAndRotateRecovery(pin, accounts);
+      } else if (changingExistingPin && window.__vaultMasterKey) {
+        // Ordinary PIN change: same master key, same recovery code.
+        await rewrapPin(pin, accounts);
+      } else {
+        // True first-time setup: brand-new vault, brand-new recovery code.
+        newRecoveryCode = await createVault(pin, accounts);
+      }
+
+      localStorage.setItem(PIN_HASH_KEY, await sha256Hex(pin));
+      window.__vaultPin = pin;
+      window.__verifiedOldPin = '';
+      window.__pendingRecoveryRotation = false;
+      vaultUnlocked = true;
+      pinMode = 'unlock';
+      pinSetupStep = 0;
+      setPinButtonState();
+      hideLock();
+
+      if (newRecoveryCode) {
+        showRecoveryCodeScreen(newRecoveryCode, viaRecovery
+          ? '✓ PIN RESET — new recovery code issued.'
+          : '✓ PIN SET — vault encrypted.');
+      } else {
+        showListScreen();
+        showToastSecurity('✓ PIN CHANGED — vault re-encrypted.');
+      }
+      return;
+    }
+
+    // Existing PIN must always be verified before changing or disabling it.
+    if (!stored || (await sha256Hex(pin)) !== stored) throw new Error('Incorrect current PIN.');
+
+    if (pinMode === 'verify-change') {
+      // Current PIN verified; decrypt the existing vault (this also
+      // populates window.__vaultMasterKey) before starting new-PIN setup.
+      window.__pendingRecoveryRotation = false;
+      if (hasEncryptedVault()) {
+        accounts = await decryptAccountsFromVault(pin);
+        window.__vaultPin = pin;
+        renderAccountList();
+      }
+      window.__verifiedOldPin = pin;
+      pinMode = 'setup';
+      pinSetupStep = 1;
+      firstSetupPin = '';
+      unlockPin.value = '';
+      lockTitle.textContent = 'Set new PIN';
+      lockDescription.textContent = 'Choose a new 4–8 digit PIN. You will confirm it next.';
+      updateLockActionLabel();
+      lockError.textContent = '';
+      unlockPin.focus();
+      return;
+    }
+
+    if (pinMode === 'view-recovery') {
+      // Regenerating invalidates the old recovery code permanently — confirm before proceeding.
+      const okRegen = window.confirm('Generate a new recovery code? Your OLD recovery code will stop working immediately and cannot be recovered. Make sure you save the new one.');
+      if (!okRegen) { pinMode = 'unlock'; hideLock(); openSettings(); return; }
+
+      // Current PIN verified; make sure the master key is loaded (it
+      // already will be if the app is unlocked, but re-decrypt to be safe
+      // in case this was reached in an unusual state), then issue a fresh
+      // recovery code and invalidate the old one.
+      if (!window.__vaultMasterKey && hasEncryptedVault()) {
+        accounts = await decryptAccountsFromVault(pin);
+        window.__vaultPin = pin;
+      }
+      const newRecoveryCode = await regenerateRecoveryCode(accounts);
+      pinMode = 'unlock';
+      vaultUnlocked = true;
+      setPinButtonState();
+      hideLock();
+      showRecoveryCodeScreen(newRecoveryCode, '✓ New recovery code generated — your old code no longer works.');
+      return;
+    }
+
+    if (pinMode === 'verify-disable') {
+      // Disabling the PIN also disables encrypted-at-rest storage. Make this explicit.
+      const ok = window.confirm('Disable PIN and encrypted vault? Your accounts will remain on this browser, but will be stored without encryption. The recovery code will also stop working.');
+      if (!ok) { pinMode = 'unlock'; hideLock(); openSettings(); return; }
+      await decryptAccountsFromVault(pin).then(function(list){ accounts = list; });
+      localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
+      localStorage.removeItem(VAULT_STORAGE_KEY);
+      localStorage.removeItem(PIN_HASH_KEY);
+      localStorage.removeItem(PIN_ATTEMPTS_KEY);
+      localStorage.setItem(AUTO_LOCK_KEY, '0');
+      autoLockSelect.value = '0';
+      window.__vaultPin = '';
+      window.__vaultMasterKey = null;
+      window.__vaultPinWrap = null;
+      window.__vaultRecoveryWrap = null;
+      vaultUnlocked = true;
+      setPinButtonState();
+      hideLock();
+      showListScreen();
+      showToastSecurity('✓ PIN DISABLED — vault unencrypted.');
+      return;
+    }
+
+    // Normal unlock: decrypt the vault with the verified PIN before showing accounts.
+    if (pinMode === 'unlock') {
+      if (hasEncryptedVault()) {
+        accounts = await decryptAccountsFromVault(pin);
+        window.__vaultPin = pin;
+        vaultUnlocked = true;
+        renderAccountList();
+      } else {
+        // One-time migration from the older Phase 4 plaintext storage.
+        // showLock() deliberately wipes the in-memory array, so read the legacy
+        // copy directly from localStorage before replacing it with the vault.
+        let legacyAccounts = [];
+        try {
+          const savedLegacy = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
+          const parsedLegacy = savedLegacy ? JSON.parse(savedLegacy) : [];
+          legacyAccounts = Array.isArray(parsedLegacy) ? parsedLegacy : [];
+        } catch(e) { legacyAccounts = []; }
+        accounts = legacyAccounts;
+        const recoveryCode = await createVault(pin, accounts);
+        window.__pendingRecoveryCodeToShow = recoveryCode;
+        window.__vaultPin = pin;
+        vaultUnlocked = true;
+      }
+    }
+    hideLock();
+    if (window.__pendingRecoveryCodeToShow) {
+      const code = window.__pendingRecoveryCodeToShow;
+      window.__pendingRecoveryCodeToShow = null;
+      showRecoveryCodeScreen(code, '✓ Vault upgraded — recovery code created.');
+    } else {
+      showListScreen();
+    }
+  }
+
+  function showToastSecurity(text){
+    const t = document.getElementById('globalToast');
+    if (t){ t.textContent = text; t.hidden = false; clearTimeout(window.__securityToast); window.__securityToast = setTimeout(function(){ t.hidden = true; }, 1800); }
+  }
+
+  unlockForm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    try {
+      await unlockWithSecurity(unlockPin.value.trim());
+    } catch(err) {
+      lockError.textContent = err.message || 'Unable to continue.';
+      unlockPin.value = '';
+      unlockPin.focus();
+    }
+  });
+
+  lockResetApp.addEventListener('click', hardResetAppData);
+
+  /* ---------- Recovery code: one-time display screen ---------- */
+  function showRecoveryCodeScreen(code, toastMessage){
+    recoveryCodeValue.textContent = code;
+    recoveryCodeConfirm.checked = false;
+    recoveryCodeContinue.disabled = true;
+    recoveryCodeScreen.classList.add('open');
+    recoveryCodeScreen.setAttribute('aria-hidden','false');
+    window.__pendingRecoveryToastMessage = toastMessage || '';
+  }
+  function hideRecoveryCodeScreen(){
+    recoveryCodeScreen.classList.remove('open');
+    recoveryCodeScreen.setAttribute('aria-hidden','true');
+    recoveryCodeValue.textContent = '';
+  }
+  recoveryCodeConfirm.addEventListener('change', function(){
+    recoveryCodeContinue.disabled = !this.checked;
+  });
+  recoveryCodeContinue.addEventListener('click', function(){
+    if (!recoveryCodeConfirm.checked) return;
+    hideRecoveryCodeScreen();
+    showListScreen();
+    if (window.__pendingRecoveryToastMessage){
+      showToastSecurity(window.__pendingRecoveryToastMessage);
+      window.__pendingRecoveryToastMessage = '';
+    }
+  });
+  recoveryCodeCopy.addEventListener('click', async function(){
+    const text = recoveryCodeValue.textContent;
+    if (!text) return;
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch(e){ /* fall through to the execCommand fallback below */ }
+
+    if (!copied) {
+      // Clipboard API unavailable or blocked (e.g. insecure context) —
+      // fall back to the older selection-based copy method.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { copied = document.execCommand('copy'); } catch(e2) { copied = false; }
+      document.body.removeChild(ta);
+    }
+
+    if (copied) {
+      showToastSecurity('Recovery code copied.');
+      const originalLabel = recoveryCodeCopy.textContent;
+      recoveryCodeCopy.textContent = '✓ Copied';
+      recoveryCodeCopy.disabled = true;
+      setTimeout(function(){
+        recoveryCodeCopy.textContent = originalLabel;
+        recoveryCodeCopy.disabled = false;
+      }, 1500);
+    } else {
+      showToastSecurity('Could not copy — select and copy the code manually.');
+    }
+  });
+
+  /* ---------- Recovery code: entry screen (forgot PIN) ---------- */
+  function openRecoveryEntry(){
+    recoveryCodeInput.value = '';
+    recoveryEntryError.textContent = '';
+    recoveryEntryScreen.classList.add('open');
+    recoveryEntryScreen.setAttribute('aria-hidden','false');
+    setTimeout(function(){ recoveryCodeInput.focus(); }, 80);
+  }
+  function closeRecoveryEntry(){
+    recoveryEntryScreen.classList.remove('open');
+    recoveryEntryScreen.setAttribute('aria-hidden','true');
+    recoveryCodeInput.value = '';
+    recoveryEntryError.textContent = '';
+  }
+  if (lockUseRecovery) lockUseRecovery.addEventListener('click', openRecoveryEntry);
+  recoveryEntryCancel.addEventListener('click', closeRecoveryEntry);
+  recoveryEntryScreen.addEventListener('click', function(e){ if (e.target === recoveryEntryScreen) closeRecoveryEntry(); });
+
+  recoveryEntryForm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    const inputCode = recoveryCodeInput.value.trim();
+    if (!inputCode){ recoveryEntryError.textContent = 'Enter your recovery code.'; return; }
+    try {
+      const list = await unlockWithRecoveryCode(inputCode);
+      accounts = list;
+      window.__pendingRecoveryRotation = true;
+
+      // A successful recovery-code entry clears any PIN lockout in progress —
+      // the user has just proven a different, independent secret.
+      clearPinAttempts();
+      if (pinLockoutTimer){ clearInterval(pinLockoutTimer); pinLockoutTimer = null; }
+      unlockPin.disabled = false;
+      lockSubmitBtn.disabled = false;
+
+      closeRecoveryEntry();
+
+      // Fall into the same "set new PIN" UI used for first-time setup,
+      // but with no way back to the (forgotten) old PIN.
+      pinMode = 'setup';
+      pinSetupStep = 1;
+      firstSetupPin = '';
+      unlockPin.value = '';
+      lockTitle.textContent = 'Recovery verified — set a new PIN';
+      lockDescription.textContent = 'Choose a new 4–8 digit PIN. You will confirm it next.';
+      lockCancelSetup.hidden = true;
+      if (lockUseRecovery) lockUseRecovery.hidden = true;
+      if (lockResetApp) lockResetApp.hidden = true;
+      updateLockActionLabel();
+      lockError.textContent = '';
+      unlockPin.focus();
+    } catch(err){
+      recoveryEntryError.textContent = err.message || 'Unable to verify recovery code.';
+      recoveryCodeInput.value = '';
+      recoveryCodeInput.focus();
+    }
+  });
+
+  lockCancelSetup.addEventListener('click', function(){
+    if (pinMode === 'unlock') return;
+    pinMode = 'unlock';
+    pinSetupStep = 0;
+    firstSetupPin = '';
+    // A PIN verification/change/disable flow should return to the settings screen,
+    // while first-time setup simply closes the lock overlay.
+    hideLock();
+    openSettings();
+  });
+
+  drawerLock.addEventListener('click', function(){
+    closeDrawer();
+    if (hasPin()) showLock('unlock');
+    else { openSettings(); showToastSecurity('Set a PIN first.'); }
+  });
+
+  pinSetupBtn.addEventListener('click', function(){
+    closeSettings();
+    if (hasPin()) {
+      // Changing an existing PIN ALWAYS starts with the current PIN.
+      showLock('verify-change');
+    } else {
+      showLock('setup');
+    }
+  });
+
+  pinDisableBtn.addEventListener('click', function(){
+    closeSettings();
+    // Disabling an existing PIN ALWAYS requires the current PIN.
+    showLock('verify-disable');
+  });
+
+  if (viewRecoveryBtn) viewRecoveryBtn.addEventListener('click', function(){
+    closeSettings();
+    // Regenerating the recovery code ALWAYS requires the current PIN.
+    showLock('view-recovery');
+  });
+
+  hideCodesToggle.addEventListener('click', function(){
+    document.body.classList.toggle('hide-codes');
+    const hidden = document.body.classList.contains('hide-codes');
+    this.classList.toggle('on', hidden);
+    localStorage.setItem(HIDE_CODES_KEY, hidden ? '1' : '0');
+    // System hide/show changes the default for every account. Per-account eye
+    // overrides remain temporary and are cleared when the global setting changes.
+    accountVisibility.forEach(function(entry){ if (entry.timer) clearTimeout(entry.timer); });
+    accountVisibility.clear();
+    renderAccountList();
+  });
+  function biometricSupported(){
+    return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create && navigator.credentials.get);
+  }
+
+  function hasBiometric(){ return !!localStorage.getItem(BIOMETRIC_CRED_KEY); }
+
+  function updateBiometricUI(){
+    const ok = hasBiometric();
+    biometricStatus.textContent = ok ? 'SET' : 'NOT SET';
+    biometricStatus.style.color = ok ? 'var(--teal)' : 'var(--amber)';
+    biometricBtn.textContent = ok ? 'Remove' : 'Set up';
+  }
+
+  async function setupBiometric(){
+    if (!window.isSecureContext || !biometricSupported()) throw new Error('Biometric verification requires HTTPS/localhost and a browser with WebAuthn support.');
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = crypto.getRandomValues(new Uint8Array(16));
+    const credential = await navigator.credentials.create({ publicKey: {
+      challenge,
+      rp: { name: 'Authenticator' },
+      user: { id: userId, name: 'local-authenticator', displayName: 'Authenticator' },
+      pubKeyCredParams: [{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection: { residentKey:'preferred', userVerification:'required' },
+      timeout: 60000,
+      attestation: 'none'
+    }});
+    if (!credential) throw new Error('Biometric setup was cancelled.');
+    localStorage.setItem(BIOMETRIC_CRED_KEY, btoa(String.fromCharCode(...new Uint8Array(credential.rawId))));
+    updateBiometricUI();
+    showToastSecurity('Biometric verification enabled.');
+  }
+
+  async function verifyBiometric(){
+    if (!hasBiometric()) return true;
+    if (!biometricSupported() || !window.isSecureContext) throw new Error('Biometric verification is unavailable in this browser.');
+    const id = Uint8Array.from(atob(localStorage.getItem(BIOMETRIC_CRED_KEY)), c=>c.charCodeAt(0));
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge,
+      allowCredentials: [{ id, type:'public-key', transports:['internal'] }],
+      userVerification: 'required',
+      timeout: 60000
+    }});
+    if (!assertion) throw new Error('Biometric verification failed.');
+    return true;
+  }
+
+  biometricBtn.addEventListener('click', async function(){
+    try{
+      if(hasBiometric()){
+        if(!confirm('Remove biometric verification from this browser?')) return;
+        localStorage.removeItem(BIOMETRIC_CRED_KEY);
+        updateBiometricUI();
+        showToastSecurity('Biometric verification removed.');
+      } else {
+        await setupBiometric();
+      }
+    }catch(err){ showToastSecurity(err.message || 'Biometric setup failed.'); }
+  });
+
+  backgroundLockToggle.addEventListener('click', function(){
+    const on = !backgroundLockToggle.classList.contains('on');
+    backgroundLockToggle.classList.toggle('on', on);
+    localStorage.setItem(BACKGROUND_LOCK_KEY, on ? '1' : '0');
+  });
+
+  async function unlockWithSecurity(pin){
+    const gatedMode = pinMode === 'unlock' || pinMode === 'verify-change' || pinMode === 'verify-disable' || pinMode === 'view-recovery';
+
+    if (gatedMode){
+      const remaining = pinLockoutRemainingMs();
+      if (remaining > 0){
+        applyPinLockoutUI();
+        throw new Error('Too many incorrect attempts. Try again in ' + formatLockoutDuration(remaining) + '.');
+      }
+    }
+
+    if (hasBiometric()) await verifyBiometric();
+
+    try {
+      await unlockOrSetup(pin);
+      if (gatedMode) clearPinAttempts();
+    } catch(err) {
+      if (gatedMode && /incorrect current pin/i.test(err.message || '')){
+        const state = registerFailedPinAttempt();
+        if (state.lockedUntil > Date.now()){
+          applyPinLockoutUI();
+          throw new Error('Too many incorrect attempts. Try again in ' + formatLockoutDuration(state.lockedUntil - Date.now()) + '.');
+        }
+      }
+      throw err;
+    }
+  }
+
+  function resetAutoLock(){
+    lastActivity = Date.now();
+    if (autoLockTimer) clearTimeout(autoLockTimer);
+    const mins = Number(localStorage.getItem(AUTO_LOCK_KEY) || '0');
+    if (!hasPin() || !mins || appLocked) return;
+    autoLockTimer = setTimeout(function(){ if(!appLocked && hasPin()) showLock(false); }, mins * 60000);
+  }
+  autoLockSelect.addEventListener('change', function(){ localStorage.setItem(AUTO_LOCK_KEY, this.value); resetAutoLock(); });
+  ['pointerdown','touchstart','keydown','mousemove'].forEach(function(evt){ document.addEventListener(evt, function(){ if(!appLocked) resetAutoLock(); }, {passive:true}); });
+  const privacyScreen = document.getElementById('privacyScreen');
+  let privacyHidden = false;
+  function showPrivacyScreen(){
+    privacyHidden = true;
+    document.documentElement.classList.add('privacy-active');
+    if (privacyScreen) { privacyScreen.classList.add('active'); privacyScreen.setAttribute('aria-hidden','false'); }
+  }
+  function hidePrivacyScreen(){
+    privacyHidden = false;
+    document.documentElement.classList.remove('privacy-active');
+    if (privacyScreen) { privacyScreen.classList.remove('active'); privacyScreen.setAttribute('aria-hidden','true'); }
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden){
+      // Hide all sensitive UI before Android/browser captures the Recent Apps preview.
+      showPrivacyScreen();
+      if(hasPin() && localStorage.getItem(BACKGROUND_LOCK_KEY)==='1' && !appLocked) showLock(false);
+      return;
+    }
+    // Reveal only after the page is visible again. If background locking is enabled,
+    // the PIN/biometric lock remains above the app.
+    hidePrivacyScreen();
+    const mins=Number(localStorage.getItem(AUTO_LOCK_KEY)||'0');
+    if(hasPin() && mins && Date.now()-lastActivity >= mins*60000) showLock(false);
+    else resetAutoLock();
+  });
+
+  /* Restore Phase 4 preferences on startup. */
+  (function initSecurityPreferences(){
+    const hidden = localStorage.getItem(HIDE_CODES_KEY) === '1';
+    document.body.classList.toggle('hide-codes', hidden);
+    hideCodesToggle.classList.toggle('on', hidden);
+    const mins = localStorage.getItem(AUTO_LOCK_KEY) || '0';
+    autoLockSelect.value = ['0','1','5','15'].includes(mins) ? mins : '0';
+    const bg = localStorage.getItem(BACKGROUND_LOCK_KEY) === '1';
+    backgroundLockToggle.classList.toggle('on', bg);
+    updateBiometricUI();
+    setPinButtonState();
+    if (hasPin()) showLock(false);
+    else resetAutoLock();
+  })();
+
+  function setDrawer(open){
+    navDrawer.classList.toggle('open', open);
+    drawerOverlay.classList.toggle('open', open);
+    navDrawer.setAttribute('aria-hidden', String(!open));
+    if (menuBtn) menuBtn.setAttribute('aria-expanded', String(open));
+  }
+  function closeDrawer(){ setDrawer(false); }
+
+  if(menuBtn) menuBtn.addEventListener('click', function(){
+    setDrawer(!navDrawer.classList.contains('open'));
+  });
+  drawerClose.addEventListener('click', closeDrawer);
+  drawerOverlay.addEventListener('click', closeDrawer);
+
+  drawerAccounts.addEventListener('click', function(){
+    closeDrawer();
+    if(typeof showListScreen === 'function') showListScreen();
+  });
+
+  drawerAddAccount.addEventListener('click', function(){
+    closeDrawer();
+    if(typeof addAccountBtn !== 'undefined') addAccountBtn.click();
+    else if(typeof showGeneratorScreen === 'function') showGeneratorScreen();
+  });
+
+  function openSettings(){
+    closeDrawer();
+    settingsPanel.classList.add('open');
+    settingsPanel.setAttribute('aria-hidden','false');
+    settingsSearch.value = '';
+    filterSettingsRows('');
+    setTimeout(function(){ settingsSearch.focus(); }, 200);
+  }
+  function closeSettings(){
+    settingsPanel.classList.remove('open');
+    settingsPanel.setAttribute('aria-hidden','true');
+    settingsSearch.value = '';
+    filterSettingsRows('');
+  }
+
+  const settingsSearch = document.getElementById('settingsSearch');
+  const settingsRowsWrap = document.getElementById('settingsRowsWrap');
+  const settingsNoResults = document.getElementById('settingsNoResults');
+  const settingsFilterable = Array.prototype.slice.call(
+    settingsRowsWrap.querySelectorAll('.settings-row, .security-note')
+  );
+  function filterSettingsRows(query){
+    const q = query.trim().toLowerCase();
+    let visibleCount = 0;
+    settingsFilterable.forEach(function(row){
+      const haystack = (row.textContent + ' ' + (row.getAttribute('data-keywords') || '')).toLowerCase();
+      const match = !q || haystack.includes(q);
+      row.hidden = !match;
+      if (match) visibleCount += 1;
+    });
+    settingsNoResults.hidden = visibleCount !== 0;
+    settingsRowsWrap.hidden = visibleCount === 0;
+  }
+  settingsSearch.addEventListener('input', function(){ filterSettingsRows(this.value); });
+  drawerSettings.addEventListener('click', openSettings);
+  settingsClose.addEventListener('click', closeSettings);
+  settingsBack.addEventListener('click', closeSettings);
+  settingsPanel.addEventListener('click', function(e){ if(e.target === settingsPanel) closeSettings(); });
+
+  function openAbout(){ closeDrawer(); aboutPanel.classList.add('open'); aboutPanel.setAttribute('aria-hidden','false'); }
+  function closeAbout(){ aboutPanel.classList.remove('open'); aboutPanel.setAttribute('aria-hidden','true'); }
+  drawerAbout.addEventListener('click', openAbout);
+  aboutClose.addEventListener('click', closeAbout);
+  aboutPanel.addEventListener('click', function(e){ if(e.target === aboutPanel) closeAbout(); });
+
+  /* Keep the requested dark visual style; toggle adds a restrained light variant. */
+  themeToggle.addEventListener('click', function(){
+    document.body.classList.toggle('light-theme');
+    this.classList.toggle('on');
+  });
+
+  /* ---------- Phase 3/8: encrypted backup & restore ---------- */
+  const backupPasswordPanel = document.getElementById('backupPasswordPanel');
+  const backupPasswordTitle = document.getElementById('backupPasswordTitle');
+  const backupPasswordDescription = document.getElementById('backupPasswordDescription');
+  const backupPasswordForm = document.getElementById('backupPasswordForm');
+  const backupPassword = document.getElementById('backupPassword');
+  const backupPasswordConfirm = document.getElementById('backupPasswordConfirm');
+  const backupPasswordSubmit = document.getElementById('backupPasswordSubmit');
+  const backupPasswordError = document.getElementById('backupPasswordError');
+  const backupPasswordCancel = document.getElementById('backupPasswordCancel');
+  const backupChoicePanel = document.getElementById('backupChoicePanel');
+  const chooseEncryptedBackup = document.getElementById('chooseEncryptedBackup');
+  const choosePlainBackup = document.getElementById('choosePlainBackup');
+  const backupChoiceCancel = document.getElementById('backupChoiceCancel');
+  let backupPasswordMode = null;
+
+  const BACKUP_VERSION = 2;
+  const BACKUP_ITERATIONS = 250000;
+
+  function openBackup(){
+    closeDrawer();
+    closeSettings();
+    backupStatus.textContent = accounts.length ? (accounts.length + ' account' + (accounts.length === 1 ? '' : 's') + ' ready for backup.') : 'No accounts are currently stored.';
+    backupPanel.classList.add('open');
+    backupPanel.setAttribute('aria-hidden','false');
+  }
+  function closeBackup(){
+    backupPanel.classList.remove('open');
+    backupPanel.setAttribute('aria-hidden','true');
+  }
+  function setBackupStatus(text, ok){
+    backupStatus.textContent = text;
+    backupStatus.style.color = ok ? 'var(--amber)' : 'var(--text-dim)';
+  }
+
+  function openBackupChoice(){
+    backupChoicePanel.classList.add('open');
+    backupChoicePanel.setAttribute('aria-hidden','false');
+  }
+  function closeBackupChoice(){
+    backupChoicePanel.classList.remove('open');
+    backupChoicePanel.setAttribute('aria-hidden','true');
+  }
+
+  function openBackupPassword(mode){
+    backupPasswordMode = mode;
+    backupPasswordForm.reset();
+    backupPasswordError.textContent = '';
+    if (mode === 'export'){
+      backupPasswordTitle.textContent = 'Encrypt backup';
+      backupPasswordDescription.textContent = 'Create a separate password for this backup. It is never stored by the app.';
+      backupPasswordConfirm.hidden = false;
+      backupPasswordSubmit.textContent = 'ENCRYPT BACKUP';
+    } else {
+      backupPasswordTitle.textContent = 'Decrypt backup';
+      backupPasswordDescription.textContent = 'Enter the password used when this backup was created.';
+      backupPasswordConfirm.hidden = true;
+      backupPasswordSubmit.textContent = 'RESTORE BACKUP';
+    }
+    backupPasswordPanel.classList.add('open');
+    backupPasswordPanel.setAttribute('aria-hidden','false');
+    setTimeout(function(){ backupPassword.focus(); }, 30);
+  }
+  function closeBackupPassword(){
+    backupPasswordPanel.classList.remove('open');
+    backupPasswordPanel.setAttribute('aria-hidden','true');
+    backupPasswordMode = null;
+    backupPassword.value = '';
+    backupPasswordConfirm.value = '';
+    backupPasswordError.textContent = '';
+  }
+
+  async function deriveBackupKey(password, salt, iterations){
+    if (!window.crypto || !crypto.subtle) throw new Error('Secure encryption is unavailable in this browser.');
+    const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      {name:'PBKDF2', salt:salt, iterations:iterations, hash:'SHA-256'},
+      material,
+      {name:'AES-GCM', length:256},
+      false,
+      ['encrypt','decrypt']
+    );
+  }
+
+  async function encryptBackupPayload(password, payload){
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveBackupKey(password, salt, BACKUP_ITERATIONS);
+    const plain = new TextEncoder().encode(JSON.stringify(payload));
+    const cipher = await crypto.subtle.encrypt({name:'AES-GCM',iv:iv}, key, plain);
+    return {
+      format:'totp-authenticator-encrypted-backup',
+      version:BACKUP_VERSION,
+      algorithm:'AES-GCM-256',
+      kdf:'PBKDF2-SHA256',
+      iterations:BACKUP_ITERATIONS,
+      salt:bytesToB64(salt),
+      iv:bytesToB64(iv),
+      data:bytesToB64(new Uint8Array(cipher))
+    };
+  }
+
+  async function decryptBackupPayload(password, record){
+    if (!record || record.format !== 'totp-authenticator-encrypted-backup' || record.version !== BACKUP_VERSION) throw new Error('Unsupported encrypted backup format.');
+    const salt = b64ToBytes(record.salt), iv = b64ToBytes(record.iv), data = b64ToBytes(record.data);
+    const iterations = Number(record.iterations) || BACKUP_ITERATIONS;
+    const key = await deriveBackupKey(password, salt, iterations);
+    let plain;
+    try { plain = await crypto.subtle.decrypt({name:'AES-GCM',iv:iv}, key, data); }
+    catch(e){ throw new Error('Incorrect backup password or damaged backup.'); }
+    const parsed = JSON.parse(new TextDecoder().decode(plain));
+    if (!parsed || !Array.isArray(parsed.accounts)) throw new Error('Invalid decrypted backup contents.');
+    return parsed;
+  }
+
+  drawerBackup.addEventListener('click', openBackup);
+  settingsBackup.addEventListener('click', openBackup);
+  backupClose.addEventListener('click', closeBackup);
+  backupPanel.addEventListener('click', function(e){ if(e.target === backupPanel) closeBackup(); });
+  backupPasswordCancel.addEventListener('click', closeBackupPassword);
+  backupPasswordPanel.addEventListener('click', function(e){ if(e.target === backupPasswordPanel) closeBackupPassword(); });
+
+  exportBackup.addEventListener('click', function(){
+    if (!accounts.length){ setBackupStatus('There are no accounts to export.', false); return; }
+    openBackupChoice();
+  });
+
+  backupChoiceCancel.addEventListener('click', closeBackupChoice);
+  backupChoicePanel.addEventListener('click', function(e){ if(e.target === backupChoicePanel) closeBackupChoice(); });
+  chooseEncryptedBackup.addEventListener('click', function(){ closeBackupChoice(); openBackupPassword('export'); });
+  choosePlainBackup.addEventListener('click', function(){
+    closeBackupChoice();
+    const caution = window.confirm('CAUTION\n\nThis backup will contain your TOTP secrets in readable form. Anyone who gets this file may be able to generate your OTP codes.\n\nContinue with an unencrypted backup?');
+    if (!caution) return;
+    exportPlainBackup();
+  });
+
+  async function exportPlainBackup(){
+    const payload = {
+      format:'totp-authenticator-backup',
+      version:1,
+      protection:'none',
+      exportedAt:new Date().toISOString(),
+      accounts:accounts.map(function(a){
+        return {id:a.id,name:a.name,secret:a.secret,digits:a.digits,period:a.period,type:a.type||'totp',algorithm:a.algorithm||'SHA-1',counter:Number(a.counter)||0,createdAt:a.createdAt};
+      })
+    };
+    const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g,'-').replace('Z','');
+    a.href=url; a.download='authenticator-backup-'+stamp+'.json'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},1000);
+    setBackupStatus('Unencrypted backup exported. Keep the file private.',false);
+  }
+
+  importBackup.addEventListener('click', function(){ backupFileInput.value = ''; backupFileInput.click(); });
+
+  backupPasswordForm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    const pw = backupPassword.value;
+    if (pw.length < 8){ backupPasswordError.textContent = 'Use at least 8 characters. Numbers-only passwords are allowed.'; return; }
+    if (backupPasswordMode === 'export' && pw !== backupPasswordConfirm.value){ backupPasswordError.textContent = 'Passwords do not match.'; return; }
+    backupPasswordSubmit.disabled = true;
+    backupPasswordError.textContent = '';
+    try{
+      if (backupPasswordMode === 'export'){
+        const payload = {
+          format:'totp-authenticator-backup',
+          version:1,
+          exportedAt:new Date().toISOString(),
+          accounts:accounts.map(function(a){
+            return {id:a.id,name:a.name,secret:a.secret,digits:a.digits,period:a.period,type:a.type||'totp',algorithm:a.algorithm||'SHA-1',counter:Number(a.counter)||0,createdAt:a.createdAt};
+          })
+        };
+        const encrypted = await encryptBackupPayload(pw, payload);
+        const blob = new Blob([JSON.stringify(encrypted,null,2)],{type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const stamp = new Date().toISOString().replace(/[:.]/g,'-').replace('Z','');
+        a.href=url; a.download='authenticator-encrypted-backup-'+stamp+'.json'; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){URL.revokeObjectURL(url);},1000);
+        closeBackupPassword();
+        setBackupStatus('Encrypted backup exported successfully.',true);
+      } else {
+        const file = backupFileInput.files && backupFileInput.files[0];
+        if (!file) throw new Error('No backup file selected.');
+        const data = JSON.parse(await file.text());
+        if (data && data.format === 'totp-authenticator-encrypted-backup'){
+          const decrypted = await decryptBackupPayload(pw,data);
+          const imported = normalizeImportedAccounts(decrypted.accounts);
+          closeBackupPassword();
+          window.showSafeImportChoice({count:imported.length, encrypted:true, imported:imported});
+        } else {
+          throw new Error('This is not an encrypted backup.');
+        }
+      }
+    } catch(err){ backupPasswordError.textContent = err.message || 'Backup operation failed.'; }
+    finally { backupPasswordSubmit.disabled = false; }
+  });
+
+  function normalizeImportedAccounts(list){
+    if (!Array.isArray(list)) throw new Error('Backup contains no accounts.');
+    return list.map(function(a,index){
+      if (!a || typeof a.secret !== 'string' || !a.secret.trim()) throw new Error('Account '+(index+1)+' has no secret.');
+      const secret=a.secret.trim().replace(/\s+/g,'').toUpperCase();
+      if (!base32Decode(secret).length) throw new Error('Account '+(index+1)+' contains an invalid Base32 secret.');
+      return {id:(typeof a.id==='number'||typeof a.id==='string')?a.id:Date.now()+index,name:String(a.name||('Imported account '+(index+1))).trim()||('Imported account '+(index+1)),secret:secret,digits:a.digits===8?8:6,period:Number(a.period)>0?Number(a.period):30,type:(String(a.type||'totp').toLowerCase()==='hotp'?'hotp':'totp'),algorithm:['SHA-1','SHA-256','SHA-512'].includes(String(a.algorithm||'SHA-1').toUpperCase())?String(a.algorithm||'SHA-1').toUpperCase():'SHA-1',counter:Number(a.counter)||0,createdAt:Number(a.createdAt)||Date.now()};
+    });
+  }
+  function applyImportedAccounts(imported, action){
+    if (!Array.isArray(imported) || !imported.length) throw new Error('Backup contains no accounts.');
+    if (action === 'replace'){
+      accounts = imported;
+    } else if (action === 'merge'){
+      const existingSecrets = new Set(accounts.map(function(a){
+        return String(a.secret || '').replace(/\s+/g,'').toUpperCase();
+      }));
+      imported.forEach(function(a){
+        if (existingSecrets.has(a.secret)) return;
+        if (accounts.some(function(x){ return x.id === a.id; })){
+          a.id = Date.now() + Math.floor(Math.random()*100000);
+        }
+        a.name = dedupeName(a.name, null);
+        accounts.push(a);
+        existingSecrets.add(a.secret);
+      });
+    } else {
+      throw new Error('No import action selected.');
+    }
+    saveAccounts();
+    renderAccountList();
+  }
+
+  backupFileInput.addEventListener('change', function(){
+    const file=this.files&&this.files[0]; if(!file)return;
+    file.text().then(function(text){
+      let data; try{data=JSON.parse(text);}catch(e){setBackupStatus('Invalid JSON backup.',false);return;}
+      if(data && data.format==='totp-authenticator-encrypted-backup'){
+        openBackupPassword('import');
+      } else if(data && data.format==='totp-authenticator-backup' && data.protection==='none' && Array.isArray(data.accounts)){
+        try {
+          const imported = normalizeImportedAccounts(data.accounts);
+          window.showSafeImportChoice({count:imported.length, encrypted:false, imported:imported});
+        } catch(err){ setBackupStatus(err.message || 'Invalid backup.',false); }
+      } else {
+        setBackupStatus('Unsupported backup format.',false);
+      }
+    }).catch(function(){setBackupStatus('Could not read the selected file.',false);});
+  });
+
+  window.addEventListener('pagehide', function(){ showPrivacyScreen(); });
+  window.addEventListener('pageshow', function(){ if(!document.hidden) hidePrivacyScreen(); });
+
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape'){
+      closeDrawer(); closeSettings(); closeAbout(); closeBackup(); closeBackupChoice();
+    }
+  });
+
+</script>
+
+<!-- Phase 8.1: explicit import flow -->
+<div id="importFlowOverlay" class="import-flow-overlay" hidden>
+  <div class="import-flow-modal" role="dialog" aria-modal="true" aria-labelledby="importFlowTitle">
+    <div class="import-flow-header">
+      <div>
+        <div class="import-flow-eyebrow">BACKUP</div>
+        <h2 id="importFlowTitle">Import Backup</h2>
+      </div>
+      <button type="button" class="import-flow-x" id="importFlowX" aria-label="Close">×</button>
+    </div>
+
+    <div id="importFlowBody"></div>
+
+    <div class="import-flow-actions" id="importFlowActions"></div>
+  </div>
+</div>
+
+<style>
+.import-flow-overlay{
+  position:fixed; inset:0; z-index:9999;
+  background:rgba(0,0,0,.72);
+  display:flex; align-items:center; justify-content:center;
+  padding:18px;
+}
+.import-flow-overlay[hidden]{display:none}
+.import-flow-modal{
+  width:min(430px,100%);
+  max-height:min(90vh,700px);
+  overflow:auto;
+  background:var(--panel,#171717);
+  color:var(--text,#f5f5f5);
+  border:1px solid var(--border,rgba(255,255,255,.12));
+  border-radius:18px;
+  box-shadow:0 24px 70px rgba(0,0,0,.55);
+}
+.import-flow-header{
+  position:sticky; top:0; z-index:2;
+  display:flex; justify-content:space-between; align-items:center;
+  padding:18px 18px 14px;
+  background:inherit;
+  border-bottom:1px solid var(--border,rgba(255,255,255,.1));
+}
+.import-flow-eyebrow{
+  font-size:.68rem; letter-spacing:.14em; opacity:.58; margin-bottom:4px;
+}
+.import-flow-header h2{margin:0;font-size:1.18rem}
+.import-flow-x{
+  width:36px;height:36px;border-radius:10px;
+  border:1px solid var(--border,rgba(255,255,255,.12));
+  background:transparent;color:inherit;font-size:1.35rem;cursor:pointer;
+}
+.import-flow-content{padding:18px}
+.import-flow-type{
+  display:flex;gap:12px;align-items:flex-start;
+  padding:13px;border-radius:13px;margin-bottom:14px;
+  border:1px solid var(--border,rgba(255,255,255,.12));
+}
+.import-flow-type strong{display:block;margin-bottom:3px}
+.import-flow-type small{opacity:.7}
+.import-flow-type.secure{border-color:rgba(94,190,125,.35)}
+.import-flow-type.warning{border-color:rgba(236,177,63,.5)}
+.import-flow-question{font-size:.9rem;line-height:1.45;margin:16px 0 10px}
+.import-flow-choice{
+  display:flex;align-items:center;gap:12px;
+  width:100%;text-align:left;
+  padding:14px;border-radius:12px;
+  margin:8px 0;border:1px solid var(--border,rgba(255,255,255,.12));
+  background:rgba(255,255,255,.025);color:inherit;cursor:pointer;
+}
+.import-flow-choice:hover,.import-flow-choice.selected{
+  border-color:var(--amber,#d9a441);
+  background:rgba(217,164,65,.08);
+}
+.import-flow-choice input{accent-color:var(--amber,#d9a441)}
+.import-flow-choice-title{font-weight:700}
+.import-flow-choice-desc{font-size:.76rem;opacity:.65;margin-top:3px}
+.import-flow-warning{
+  padding:13px;border-radius:12px;
+  background:rgba(220,105,65,.09);
+  border:1px solid rgba(220,105,65,.35);
+  line-height:1.45;font-size:.82rem;margin-bottom:14px;
+}
+.import-flow-actions{
+  display:flex;gap:9px;padding:14px 18px 18px;
+  border-top:1px solid var(--border,rgba(255,255,255,.1));
+  position:sticky;bottom:0;background:inherit;
+}
+.import-flow-btn{
+  flex:1;min-height:44px;border-radius:11px;
+  border:1px solid var(--border,rgba(255,255,255,.12));
+  background:transparent;color:inherit;font-weight:700;cursor:pointer;
+}
+.import-flow-btn.primary{background:var(--amber,#d9a441);color:#17120a;border-color:transparent}
+.import-flow-btn.danger{background:#9d3d32;color:#fff;border-color:transparent}
+.import-flow-btn:disabled{opacity:.4;cursor:not-allowed}
+@media(max-width:420px){
+  .import-flow-overlay{padding:10px}
+  .import-flow-actions{flex-direction:column-reverse}
+}
+</style>
+
+<script>
+(function(){
+  "use strict";
+  const overlay = document.getElementById("importFlowOverlay");
+  const body = document.getElementById("importFlowBody");
+  const actions = document.getElementById("importFlowActions");
+  const closeBtn = document.getElementById("importFlowX");
+  let selected = "";
+  let pendingImported = [];
+  let pendingEncrypted = false;
+
+  function close(){
+    overlay.hidden = true;
+    selected = "";
+    pendingImported = [];
+    pendingEncrypted = false;
+  }
+
+  closeBtn.addEventListener("click", close);
+  overlay.addEventListener("click", e => { if(e.target === overlay) close(); });
+
+  window.showSafeImportChoice = function(meta){
+    pendingImported = Array.isArray(meta.imported) ? meta.imported : [];
+    pendingEncrypted = !!meta.encrypted;
+    const count = pendingImported.length || Number(meta.count || 0);
+    selected = "";
+
+    const typeClass = pendingEncrypted ? "secure" : "warning";
+    const icon = pendingEncrypted ? "🔒" : "⚠️";
+    const typeTitle = pendingEncrypted ? "Password-protected backup" : "Unencrypted backup";
+    const typeDesc = pendingEncrypted
+      ? "The backup has been successfully decrypted."
+      : "This file contains readable TOTP secrets.";
+
+    body.innerHTML = `
+      <div class="import-flow-content">
+        <div class="import-flow-type ${typeClass}">
+          <div style="font-size:1.35rem">${icon}</div>
+          <div>
+            <strong>${typeTitle}</strong>
+            <small>${typeDesc}</small>
+          </div>
+        </div>
+
+        ${pendingEncrypted ? "" : `
+          <div class="import-flow-warning">
+            <strong>Security caution</strong><br>
+            This backup contains readable TOTP secrets. Only import a file you trust.
+            Anyone who obtains an unencrypted copy may be able to generate your OTP codes.
+          </div>
+        `}
+
+        <div class="import-flow-question">
+          <strong>${count}</strong> account${count===1?"":"s"} found.<br>
+          Choose how you want to import them.
+        </div>
+
+        <label class="import-flow-choice" data-choice="merge">
+          <input type="radio" name="safeImportAction" value="merge">
+          <span>
+            <div class="import-flow-choice-title">Add to existing accounts</div>
+            <div class="import-flow-choice-desc">Keep your current accounts. Duplicate secrets will be skipped.</div>
+          </span>
+        </label>
+
+        <label class="import-flow-choice" data-choice="replace">
+          <input type="radio" name="safeImportAction" value="replace">
+          <span>
+            <div class="import-flow-choice-title">Replace existing accounts</div>
+            <div class="import-flow-choice-desc">Remove your current accounts and use only this backup.</div>
+          </span>
+        </label>
+      </div>`;
+
+    actions.innerHTML = `
+      <button type="button" class="import-flow-btn" id="safeImportCancel">Cancel</button>
+      <button type="button" class="import-flow-btn primary" id="safeImportContinue" disabled>Continue</button>
+    `;
+
+    body.querySelectorAll("[data-choice]").forEach(label => {
+      label.addEventListener("click", () => {
+        selected = label.dataset.choice;
+        body.querySelectorAll("[data-choice]").forEach(x => x.classList.remove("selected"));
+        label.classList.add("selected");
+        label.querySelector("input").checked = true;
+        document.getElementById("safeImportContinue").disabled = false;
+      });
+    });
+
+    document.getElementById("safeImportCancel").onclick = close;
+    document.getElementById("safeImportContinue").onclick = () => {
+      if(selected === "replace") showConfirm("replace", count);
+      else if(selected === "merge") showConfirm("merge", count);
+    };
+
+    overlay.hidden = false;
+  };
+
+  function showConfirm(choice, count){
+    const replace = choice === "replace";
+
+    body.innerHTML = `
+      <div class="import-flow-content">
+        <div class="import-flow-type ${replace ? "warning" : "secure"}">
+          <div style="font-size:1.35rem">${replace ? "⚠️" : "✓"}</div>
+          <div>
+            <strong>${replace ? "Replace all accounts?" : "Add backup accounts?"}</strong>
+            <small>
+              ${replace
+                ? `Your current accounts will be removed and replaced by ${count} backup account${count===1?"":"s"}.`
+                : `${count} backup account${count===1?"":"s"} will be added. Your current accounts will remain.`}
+            </small>
+          </div>
+        </div>
+
+        ${replace ? `
+          <div class="import-flow-warning">
+            <strong>This is a destructive action.</strong><br>
+            Your current account list will be replaced. Make sure you have a current backup before continuing.
+          </div>
+        ` : `
+          <div class="import-flow-warning" style="background:rgba(94,190,125,.07);border-color:rgba(94,190,125,.25)">
+            Existing accounts will remain. Accounts with duplicate TOTP secrets will be skipped.
+          </div>
+        `}
+      </div>`;
+
+    actions.innerHTML = `
+      <button type="button" class="import-flow-btn" id="safeImportBack">Go Back</button>
+      <button type="button" class="import-flow-btn ${replace ? "danger" : "primary"}" id="safeImportFinal">
+        ${replace ? "Replace Accounts" : "Add Accounts"}
+      </button>
+    `;
+
+    document.getElementById("safeImportBack").onclick = () => {
+      window.showSafeImportChoice({
+        count: pendingImported.length,
+        encrypted: pendingEncrypted,
+        imported: pendingImported
+      });
+    };
+
+    document.getElementById("safeImportFinal").onclick = () => {
+      try {
+        applyImportedAccounts(pendingImported, choice);
+        const n = pendingImported.length;
+        close();
+        setBackupStatus(
+          replace
+            ? n + " account" + (n===1?"":"s") + " restored. Existing accounts were replaced."
+            : n + " account" + (n===1?"":"s") + " processed. Existing accounts were kept.",
+          true
+        );
+      } catch(err) {
+        body.innerHTML = `
+          <div class="import-flow-content">
+            <div class="import-flow-warning">
+              <strong>Import failed</strong><br>${String(err.message || "Could not import backup.")}
+            </div>
+          </div>`;
+        actions.innerHTML = `
+          <button type="button" class="import-flow-btn primary" id="safeImportErrorClose">Close</button>`;
+        document.getElementById("safeImportErrorClose").onclick = close;
+      }
+    };
+  }
+
+  window.safeImportFlow = { open: window.showSafeImportChoice, close };
+})();
+</script>
+
+</body>
+</html>
